@@ -7,11 +7,16 @@ touched.
 
 ## Run it
 
-1. Open the project and let Unity import the new files.
-2. Menu bar → **Rotten Eggs → Add Game To Scene** (or drag the
-   `Rotten Eggs Game` component onto any empty GameObject yourself).
-3. Press **Play**. A 16:9 Game view looks best; the view only ever scales in
+1. Open the project in Unity 6 and let Unity import the files.
+2. Open `Assets/Scenes/SampleScene.unity` and press **Play**. The game creates
+   its own host object automatically, so the default scene is playable without
+   any setup.
+3. A 16:9 Game view looks best; the view only ever scales in
    whole-number steps, so the pixels stay sharp at any size.
+
+If a later scene needs an explicit host object, use menu bar → **Rotten Eggs
+→ Add Game To Scene**. The automatic bootstrap detects that component and will
+not create a duplicate.
 
 Menu bar → **Rotten Eggs → Verify Ported Rules And Assets** runs the ported rule
 checks and the asset checks and logs the results.
