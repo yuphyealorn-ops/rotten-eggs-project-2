@@ -821,7 +821,7 @@ namespace RottenEggs
                 case EggKind.Freeze:
                 {
                     PlayerState opponent = Players[1 - catcher.Index];
-                    opponent.FreezeTime = 1.5;
+                    opponent.FreezeTime = 2.0;
                     points = AddComboScore(catcher, 30);
                     SetStatus(catcher, "FREEZE!  +" + points, 1.0);
                     SetStatus(opponent, "FROZEN", 1.0);
