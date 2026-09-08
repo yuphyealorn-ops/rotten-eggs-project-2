@@ -396,7 +396,213 @@ namespace RottenEggs
         {
             foreach (GameModel.FallingEgg egg in model.FallingEggs)
             {
-                DrawEgg((int)Math.Round(egg.X), (int)Math.Round(egg.Y), egg.Kind, false);
+                DrawFallingEgg(egg);
+            }
+        }
+
+        // ── Day 4: per-egg falling detail ─────────────────────────────────────
+
+        /// <summary>
+        /// Day 4: renders one falling egg with layered visual detail.
+        /// Power eggs get vibrant per-type animations (no text labels).
+        /// Normal eggs get a shadow, trail, and crack-warning near the ground.
+        /// </summary>
+        private void DrawFallingEgg(GameModel.FallingEgg egg)
+        {
+            int x = (int)Math.Round(egg.X);
+            int y = (int)Math.Round(egg.Y);
+
+            // 1 ── Drop shadow on the ground that grows as the egg falls.
+            double distToGround = GameModel.GroundY - y;
+            double shadowT = Math.Max(0.0, Math.Min(1.0, 1.0 - distToGround / 180.0));
+            if (shadowT > 0.05)
+            {
+                int sw = 2 + (int)(12 * shadowT);
+                int sh = 1 + (int)(3  * shadowT);
+                int sx = x + 3 - sw / 2;
+                int sy = (int)GameModel.GroundY - sh - 1;
+                canvas.SetColor(0, 0, 0, (byte)(50 * shadowT));
+                canvas.FillOval(sx, sy, sw, sh);
+            }
+
+            // 2 ── Motion trail: faded ghost 4 px above the egg.
+            if (y > 20)
+            {
+                canvas.SetColor(GameModel.ColorFor(egg.Kind), 55);
+                canvas.FillOval(x, y - 4, 7, 9);
+            }
+
+            // 3 ── Per-type ambient effect BEHIND the egg body.
+            DrawPowerEggAmbient(x, y, egg.Kind);
+
+            // 4 ── Egg body (power eggs drawn larger).
+            if (egg.Kind == EggKind.Normal)
+            {
+                DrawEgg(x, y, egg.Kind, false);
+            }
+            else
+            {
+                DrawPowerEgg(x, y, egg.Kind);
+            }
+
+            // 5 ── Per-type detail AROUND the egg (sparkles, streaks, crystals).
+            DrawPowerEggDetail(x, y, egg.Kind);
+
+            // 6 ── Crack lines on normal eggs close to the ground.
+            bool nearGround = y > GameModel.GroundY - 42;
+            if (nearGround && egg.Kind == EggKind.Normal)
+            {
+                canvas.SetColor(GameModel.Dark);
+                canvas.FillRect(x + 3, y + 6, 1, 3);
+                canvas.FillRect(x + 2, y + 7, 1, 2);
+                canvas.FillRect(x + 4, y + 7, 1, 2);
+                canvas.FillRect(x + 1, y + 5, 1, 1);
+                canvas.FillRect(x + 5, y + 4, 1, 1);
+            }
+        }
+
+        /// <summary>
+        /// Day 4: large pulsing aura drawn BEFORE the egg body so the egg
+        /// appears to float inside a glowing halo. Normal eggs get nothing.
+        /// </summary>
+        private void DrawPowerEggAmbient(int x, int y, EggKind kind)
+        {
+            if (kind == EggKind.Normal) return;
+
+            Color32 auraColor = GameModel.ColorFor(kind);
+            double  pulse     = (Math.Sin(_clock * 5.0) + 1.0) / 2.0;
+            byte    alpha     = (byte)(80 + (int)(85 * pulse));
+            canvas.SetColor(auraColor, alpha);
+            canvas.FillOval(x - 4, y - 3, 15, 15);  // halo ring behind egg
+        }
+
+        /// <summary>
+        /// Day 4: per-type vibrant effect drawn AROUND the egg — no text labels.
+        ///
+        ///   Speed   → animated cyan horizontal speed-streak lines (rushing air)
+        ///   Freeze  → white ice-crystal stars at all 4 corners
+        ///   Reverse → purple arrow wings on both sides pointing outward
+        ///   Golden  → four twinkling gold sparkle crosses that alternate with clock
+        /// </summary>
+        private void DrawPowerEggDetail(int x, int y, EggKind kind)
+        {
+            switch (kind)
+            {
+                case EggKind.Speed:
+                {
+                    // Three horizontal streak lines that shift leftward with _clock,
+                    // giving a "rushing through air" feel on both sides of the egg.
+                    int shift = (int)(_clock * 10.0) % 5;
+                    canvas.SetColor(GameModel.Cyan, 210);
+                    // Left streaks
+                    canvas.FillRect(x - 8 + shift, y + 2, 4, 1);
+                    canvas.FillRect(x - 9 + shift, y + 5, 5, 1);
+                    canvas.FillRect(x - 8 + shift, y + 7, 3, 1);
+                    // Right streaks (mirror)
+                    canvas.FillRect(x + 11 - shift, y + 2, 4, 1);
+                    canvas.FillRect(x + 11 - shift, y + 5, 5, 1);
+                    canvas.FillRect(x + 11 - shift, y + 7, 3, 1);
+                    break;
+                }
+
+                case EggKind.Freeze:
+                {
+                    // Four ice-crystal + shapes at the egg corners.
+                    // Each crystal is a tiny 3-pixel cross in bright ice-white.
+                    canvas.SetColor(new Color32(210, 245, 255, 220));
+                    // Top-left
+                    canvas.FillRect(x - 5, y,     3, 1);
+                    canvas.FillRect(x - 4, y - 1, 1, 3);
+                    // Top-right
+                    canvas.FillRect(x + 9, y,     3, 1);
+                    canvas.FillRect(x + 10, y - 1, 1, 3);
+                    // Bottom-left
+                    canvas.FillRect(x - 5, y + 8, 3, 1);
+                    canvas.FillRect(x - 4, y + 7, 1, 3);
+                    // Bottom-right
+                    canvas.FillRect(x + 9, y + 8, 3, 1);
+                    canvas.FillRect(x + 10, y + 7, 1, 3);
+                    break;
+                }
+
+                case EggKind.Reverse:
+                {
+                    // Arrow "wings" on each side pointing outward — left ← and right →
+                    canvas.SetColor(GameModel.Purple, 220);
+                    // Left arrow (←)
+                    canvas.FillRect(x - 8, y + 4, 5, 1);   // shaft
+                    canvas.FillRect(x - 8, y + 3, 1, 3);   // arrowhead
+                    // Right arrow (→)
+                    canvas.FillRect(x + 10, y + 4, 5, 1);  // shaft
+                    canvas.FillRect(x + 14, y + 3, 1, 3);  // arrowhead
+                    break;
+                }
+
+                case EggKind.Golden:
+                {
+                    // Four sparkle cross-shapes (+) at cardinal positions.
+                    // Each one blinks independently on its own clock offset
+                    // so they twinkle rather than all flash at once.
+                    int[] sx = { x + 3, x - 5, x + 9, x + 3 };
+                    int[] sy = { y - 6, y + 4, y + 4, y + 13 };
+                    for (int i = 0; i < 4; i++)
+                    {
+                        if ((int)(_clock * 4.0 + i) % 2 == 0)
+                        {
+                            canvas.SetColor(GameModel.Gold, 240);
+                            canvas.FillRect(sx[i],     sy[i] - 1, 1, 3); // vertical
+                            canvas.FillRect(sx[i] - 1, sy[i],     3, 1); // horizontal
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Day 4: power egg drawn with a larger oval (9×11 shell, 11×13 border)
+        /// and bigger White symbols — size alone makes them distinct from normal.
+        /// </summary>
+        private void DrawPowerEgg(int x, int y, EggKind kind)
+        {
+            Color32 shell = GameModel.ColorFor(kind);
+
+            canvas.SetColor(GameModel.Dark);
+            canvas.FillOval(x - 2, y - 1, 11, 13);
+            canvas.SetColor(shell);
+            canvas.FillOval(x - 1, y, 9, 11);
+            canvas.SetColor(White);
+            canvas.FillRect(x + 2, y + 1, 3, 3);
+
+            canvas.SetColor(White);
+            switch (kind)
+            {
+                case EggKind.Speed:
+                    canvas.FillPolygon(
+                        new[] { x + 5, x + 2, x + 5, x + 4, x + 7 },
+                        new[] { y + 2, y + 6, y + 6, y + 9, y + 5 }, 5);
+                    break;
+                case EggKind.Freeze:
+                    canvas.FillRect(x + 4, y + 2, 1, 7);
+                    canvas.FillRect(x + 1, y + 5, 7, 1);
+                    canvas.FillRect(x + 2, y + 3, 1, 1);
+                    canvas.FillRect(x + 6, y + 3, 1, 1);
+                    canvas.FillRect(x + 2, y + 7, 1, 1);
+                    canvas.FillRect(x + 6, y + 7, 1, 1);
+                    break;
+                case EggKind.Reverse:
+                    canvas.FillRect(x + 1, y + 5, 7, 1);
+                    canvas.FillRect(x + 1, y + 4, 1, 3);
+                    canvas.FillRect(x + 7, y + 4, 1, 3);
+                    break;
+                case EggKind.Golden:
+                    canvas.FillRect(x + 3, y + 3, 3, 5);
+                    canvas.FillRect(x + 1, y + 5, 7, 1);
+                    canvas.FillRect(x + 2, y + 4, 1, 1);
+                    canvas.FillRect(x + 6, y + 4, 1, 1);
+                    canvas.FillRect(x + 2, y + 6, 1, 1);
+                    canvas.FillRect(x + 6, y + 6, 1, 1);
+                    break;
             }
         }
 

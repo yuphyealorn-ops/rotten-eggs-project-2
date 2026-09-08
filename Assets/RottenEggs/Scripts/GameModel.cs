@@ -337,7 +337,8 @@ namespace RottenEggs
         public int Defeated;
         public int WinnerPlayer;
         public double Elapsed;
-        public double LastPowerSpawn;
+        public double LastPowerSpawnP0;   // per-player for fair duo distribution
+        public double LastPowerSpawnP1;
         public double ShakeTime;
 
         public GameModel() : this(new System.Random())
@@ -433,7 +434,8 @@ namespace RottenEggs
             Defeated = 0;
             WinnerPlayer = 0;
             Elapsed = 0;
-            LastPowerSpawn = -999;
+            LastPowerSpawnP0 = -999;
+            LastPowerSpawnP1 = -999;
             ShakeTime = 0;
         }
 
@@ -648,12 +650,12 @@ namespace RottenEggs
             Chicken source = alive[Random.Next(alive.Count)];
             EggKind kind = EggKind.Normal;
             if (Elapsed >= 10
-                && Elapsed - LastPowerSpawn >= 12
-                && !PowerEggVisible()
+                && Elapsed - LastPowerSpawnP0 >= 12
+                && !PowerEggVisible(0)
                 && Random.NextDouble() < 0.12)
             {
                 kind = EggKind.Speed;
-                LastPowerSpawn = Elapsed;
+                LastPowerSpawnP0 = Elapsed;
             }
 
             source.PlayOnce(AnimState.Jumping, LayAnimSeconds, true);
@@ -681,21 +683,24 @@ namespace RottenEggs
             Chicken source = ownedChickens[Random.Next(ownedChickens.Count)];
 
             EggKind kind = EggKind.Normal;
-            if (Elapsed >= 8
-                && Elapsed - LastPowerSpawn >= 7
-                && !PowerEggVisible()
-                && Random.NextDouble() < 0.22)
+            // Each player has their own power-egg cooldown so neither side is
+            // starved by the other player's spawn events.
+            double lastSpawn = owner == 0 ? LastPowerSpawnP0 : LastPowerSpawnP1;
+            if (Elapsed >= 6
+                && Elapsed - lastSpawn >= 5
+                && !PowerEggVisible(owner)
+                && Random.NextDouble() < 0.30)
             {
                 double roll = Random.NextDouble();
-                if (roll < 0.40)
+                if (roll < 0.35)
                 {
                     kind = EggKind.Speed;
                 }
-                else if (roll < 0.65)
+                else if (roll < 0.60)
                 {
                     kind = EggKind.Freeze;
                 }
-                else if (roll < 0.87)
+                else if (roll < 0.82)
                 {
                     kind = EggKind.Reverse;
                 }
@@ -704,7 +709,8 @@ namespace RottenEggs
                     kind = EggKind.Golden;
                 }
 
-                LastPowerSpawn = Elapsed;
+                if (owner == 0) LastPowerSpawnP0 = Elapsed;
+                else            LastPowerSpawnP1 = Elapsed;
             }
 
             source.PlayOnce(AnimState.Jumping, LayAnimSeconds, true);
@@ -713,11 +719,11 @@ namespace RottenEggs
                 source.CenterX - EggW / 2 + jitter, source.Y + 25));
         }
 
-        private bool PowerEggVisible()
+        private bool PowerEggVisible(int owner)
         {
             foreach (FallingEgg egg in FallingEggs)
             {
-                if (egg.Kind != EggKind.Normal)
+                if (egg.Kind != EggKind.Normal && egg.Owner == owner)
                 {
                     return true;
                 }
