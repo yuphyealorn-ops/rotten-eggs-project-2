@@ -59,6 +59,17 @@ namespace RottenEggs
             { Music.Game, "game-loop.wav" }
         };
 
+        /// <summary>
+        /// Tracks supplied as ordinary imported assets, which take priority over
+        /// the bundled WAVs above. These live in Resources because the game
+        /// object is built at runtime and has no Inspector slots; anything
+        /// missing here simply falls back to its StreamingAssets counterpart.
+        /// </summary>
+        private static readonly Dictionary<Music, string> MusicResources = new Dictionary<Music, string>
+        {
+            { Music.Menu, "Audio/titlescreensong" }
+        };
+
         private readonly Dictionary<Sfx, AudioSource> sfxSources = new Dictionary<Sfx, AudioSource>();
         private readonly Dictionary<Music, AudioClip> musicClips = new Dictionary<Music, AudioClip>();
         private AudioSource musicSource;
@@ -273,7 +284,12 @@ namespace RottenEggs
 
             foreach (KeyValuePair<Music, string> entry in MusicFiles)
             {
-                AudioClip clip = LoadClip(entry.Value);
+                AudioClip clip = LoadImportedClip(entry.Key);
+                if (clip == null)
+                {
+                    clip = LoadClip(entry.Value);
+                }
+
                 if (clip != null)
                 {
                     musicClips[entry.Key] = clip;
@@ -298,6 +314,28 @@ namespace RottenEggs
 
             playbackAvailable = musicClips.Count > 0 || sfxSources.Count > 0;
             ApplyAllVolumes();
+        }
+
+        /// <summary>
+        /// Fetches a track that Unity imported normally, or null when the track
+        /// has no entry in <see cref="MusicResources"/> or the file is absent.
+        /// </summary>
+        private AudioClip LoadImportedClip(Music track)
+        {
+            string resourcePath;
+            if (!MusicResources.TryGetValue(track, out resourcePath))
+            {
+                return null;
+            }
+
+            AudioClip clip = Resources.Load<AudioClip>(resourcePath);
+            if (clip == null)
+            {
+                WarnOnce("no imported track at Resources/" + resourcePath
+                         + ", using the bundled loop instead", null);
+            }
+
+            return clip;
         }
 
         private AudioClip LoadClip(string filename)

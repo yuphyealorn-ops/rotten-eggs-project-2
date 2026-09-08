@@ -80,7 +80,10 @@ namespace RottenEggs
         public const int WorldW = 480;
         public const int WorldH = 270;
         public const double GroundY = 238;
-        public const double BasketY = 218;
+        // Sits the basket on top of the painted ground line rather than in it:
+        // the backdrop's grass edge falls at canvas row ~227, so a 15-tall
+        // basket starting here has its base at 224, just clear of the dirt.
+        public const double BasketY = 209;
         public const double BasketW = 48;
         public const double BasketH = 15;
         public const double EggW = 7;

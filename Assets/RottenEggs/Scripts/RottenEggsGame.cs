@@ -56,7 +56,7 @@ namespace RottenEggs
             }
 
             canvas = new PixelCanvas(GameModel.WorldW, GameModel.WorldH);
-            frameRenderer = new GameRenderer(canvas, sprites);
+            frameRenderer = new GameRenderer(canvas, sprites, BackgroundArt.Load());
             frameTexture = new Texture2D(GameModel.WorldW, GameModel.WorldH, TextureFormat.RGBA32, false)
             {
                 filterMode = FilterMode.Point,

@@ -11,7 +11,7 @@ namespace RottenEggs
     /// Day 3 additions (renderer only, no logic changes):
     ///   - CRT scanline overlay drawn last on every frame
     ///   - Two-layer twinkling starfield replaces uniform dot-grid sky
-    ///   - Menu: HIGH SCORE above panel, corner brackets, bouncing arrow, INSERT COIN blink
+    ///   - Menu: HIGH SCORE above panel, corner brackets, bouncing arrow
     ///   - HUD: 1UP / 2UP labels, hearts backing box, flashing power labels, FEVER blink
     ///   - Result screen: corner brackets, blinking GAME OVER text for loss
     ///   - Duo divider: double solid line instead of dashed
@@ -50,16 +50,23 @@ namespace RottenEggs
         private readonly ChickenSprites sprites;
 
         /// <summary>
+        /// Painted backdrop, already scaled to the canvas. Null falls back to the
+        /// hand-drawn sky, hills and fields below.
+        /// </summary>
+        private readonly SpriteFrame backdrop;
+
+        /// <summary>
         /// Running clock (seconds) used for retro blink / animation effects.
         /// Set once at the top of Render() and read by every sub-drawer that
         /// needs timed animation without touching game rules.
         /// </summary>
         private double _clock;
 
-        public GameRenderer(PixelCanvas canvas, ChickenSprites sprites)
+        public GameRenderer(PixelCanvas canvas, ChickenSprites sprites, SpriteFrame backdrop = null)
         {
-            this.canvas  = canvas;
-            this.sprites = sprites;
+            this.canvas   = canvas;
+            this.sprites  = sprites;
+            this.backdrop = backdrop;
         }
 
         // ══════════════════════════════════════════════════════════════════════
@@ -125,6 +132,15 @@ namespace RottenEggs
 
         private void DrawBackground()
         {
+            // Painted artwork replaces every drawn layer below it — the picture
+            // already carries its own sky, clouds, hills and ground line, so the
+            // procedural versions would only fight it.
+            if (backdrop != null)
+            {
+                canvas.DrawSprite(backdrop, 0, 0, GameModel.WorldW, GameModel.WorldH);
+                return;
+            }
+
             // Sky fill
             canvas.SetColor(Sky);
             canvas.FillRect(0, 0, GameModel.WorldW, GameModel.WorldH);
@@ -196,8 +212,8 @@ namespace RottenEggs
             DrawChicken(405, 43, AnimState.Idle, _clock + 0.25, false);
             DrawEgg(60,  115, EggKind.Normal, false);
             DrawEgg(415, 137, EggKind.Golden, false);
-            DrawBasket(84,  216, GameModel.Cyan, 0, false);
-            DrawBasket(348, 216, GameModel.Pink, 0, false);
+            DrawBasket(84,  (int)GameModel.BasketY, GameModel.Cyan, 0, false);
+            DrawBasket(348, (int)GameModel.BasketY, GameModel.Pink, 0, false);
         }
 
         private void DrawMenuOverlay(AudioManager audio, int menuSelection)
@@ -229,9 +245,11 @@ namespace RottenEggs
             canvas.FillRect(px + pw - 4,    py + ph - blen, 4,   blen);
             // ─────────────────────────────────────────────────────────────────
 
-            // Title (original positions preserved)
-            DrawCenteredText("ROTTEN EGGS",  240, 75,  White,          Black, FontLarge);
-            DrawCenteredText("UNITY EDITION", 240, 91, GameModel.Cyan, Black, FontSmall);
+            // Title, centred in the header space between the panel top (38) and
+            // the first menu option (105). FontLarge is 7 rows at PixelSize 3,
+            // so a 21-tall line centred there has its baseline at 82, leaving an
+            // even 23px above and below.
+            DrawCenteredText("ROTTEN EGGS", 240, 82, White, Black, FontLarge);
 
             // Menu options (original positions preserved)
             DrawMenuOption(92, 105, 296, 43, 0, menuSelection,
@@ -249,13 +267,6 @@ namespace RottenEggs
                 : "AUDIO " + Mathf.RoundToInt(audio.GetVolume() * 100) + "%";
             DrawCenteredText("M MUTE  •  -/+ VOLUME  •  " + audioText, 240, 220,
                 audio.IsMuted() ? GameModel.Pink : GameModel.Gold, Black, FontTiny);
-
-            // ── Day 3: blinking INSERT COIN — toggles every ~0.7 s ───────────
-            if ((int)(_clock * 1.43) % 2 == 0)
-            {
-                DrawCenteredText("- INSERT COIN -", 240, 228, White, Black, FontTiny);
-            }
-            // ─────────────────────────────────────────────────────────────────
         }
 
         private void DrawMenuOption(
