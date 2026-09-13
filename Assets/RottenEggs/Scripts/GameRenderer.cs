@@ -56,17 +56,24 @@ namespace RottenEggs
         private readonly SpriteFrame backdrop;
 
         /// <summary>
+        /// Layered HUD heart artwork. Null falls back to the drawn polygon heart.
+        /// </summary>
+        private readonly HeartSprites hearts;
+
+        /// <summary>
         /// Running clock (seconds) used for retro blink / animation effects.
         /// Set once at the top of Render() and read by every sub-drawer that
         /// needs timed animation without touching game rules.
         /// </summary>
         private double _clock;
 
-        public GameRenderer(PixelCanvas canvas, ChickenSprites sprites, SpriteFrame backdrop = null)
+        public GameRenderer(PixelCanvas canvas, ChickenSprites sprites,
+                            SpriteFrame backdrop = null, HeartSprites hearts = null)
         {
             this.canvas   = canvas;
             this.sprites  = sprites;
             this.backdrop = backdrop;
+            this.hearts   = hearts;
         }
 
         // ══════════════════════════════════════════════════════════════════════
@@ -998,6 +1005,12 @@ namespace RottenEggs
 
         private void DrawHeart(int x, int y, double fill)
         {
+            if (hearts != null)
+            {
+                DrawSpriteHeart(x, y, fill);
+                return;
+            }
+
             int[] xs = { x, x + 3, x + 7, x + 11, x + 14, x + 14, x + 7, x,     x };
             int[] ys = { y + 3, y, y + 3, y,     y + 3,  y + 7,  y + 14, y + 7, y + 3 };
             canvas.SetColor(84, 96, 102);
@@ -1012,6 +1025,37 @@ namespace RottenEggs
 
             canvas.SetColor(GameModel.Dark);
             canvas.DrawPolygon(xs, ys, 9);
+        }
+
+        /// <summary>
+        /// The layered artwork version of a heart. The dark background is always
+        /// there; the red heart is clipped to its left <paramref name="fill"/>
+        /// fraction so a half heart keeps its left lobe and shows the background
+        /// on the right; and the border goes on last so the outline stays
+        /// whole across the cut.
+        /// </summary>
+        private void DrawSpriteHeart(int x, int y, double fill)
+        {
+            int w = hearts.Width;
+            int h = hearts.Height;
+
+            // The 17px art is two rows taller than the drawn heart was; lifting
+            // it one row keeps it centred inside the existing backing box.
+            int top = y - 1;
+
+            canvas.DrawSprite(hearts.Background, x, top, x + w, top + h);
+
+            if (fill > 0)
+            {
+                // Ceiling so a half heart keeps the centre column and reads as
+                // a proper half rather than a sliver.
+                int keep = (int)Math.Ceiling(w * fill);
+                canvas.SetClip(x, top, keep, h);
+                canvas.DrawSprite(hearts.Full, x, top, x + w, top + h);
+                canvas.ClearClip();
+            }
+
+            canvas.DrawSprite(hearts.Border, x, top, x + w, top + h);
         }
 
         private void DrawResultOverlay(GameModel model)
