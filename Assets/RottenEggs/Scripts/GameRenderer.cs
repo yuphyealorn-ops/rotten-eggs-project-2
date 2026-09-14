@@ -35,6 +35,7 @@ namespace RottenEggs
         private static readonly Color32 White      = new Color32(255, 250, 240, 255);
         private static readonly Color32 Muted      = new Color32(182, 218, 226, 255);
         private static readonly Color32 Black      = new Color32(0,     0,   0, 255);
+        private static readonly Color32 Yolk       = new Color32(249, 197,  58, 255);
 
         /// <summary>The chicken frames are 20 x 21, drawn at whole-number scale like the rest.</summary>
         private const int SpriteScale = 2;
@@ -106,6 +107,7 @@ namespace RottenEggs
             }
 
             DrawParticles(model);
+            DrawCrackedEggs(model);
             canvas.ResetTranslate();
 
             if (model.Mode == Mode.Single)
@@ -835,6 +837,52 @@ namespace RottenEggs
                 canvas.SetColor(particle.Color, (byte)Mathf.Clamp(alpha, 0, 255));
                 canvas.FillRect((int)particle.X, (int)particle.Y, particle.Size, particle.Size);
             }
+        }
+
+        /// <summary>
+        /// Draws the cracked shells left by eggs that smashed on the ground.
+        /// </summary>
+        private void DrawCrackedEggs(GameModel model)
+        {
+            foreach (GameModel.CrackedEgg egg in model.CrackedEggs)
+            {
+                DrawCrackedEgg(egg);
+            }
+        }
+
+        /// <summary>
+        /// Paints a broken egg: two shell halves around a yolk that spilt out,
+        /// fading as the shell ages. Reads as a crack at a glance, unlike the
+        /// particle burst it replaces.
+        /// </summary>
+        private void DrawCrackedEgg(GameModel.CrackedEgg egg)
+        {
+            int alpha = (int)(255 * Math.Max(0, egg.Life / egg.MaxLife));
+            byte a = (byte)Mathf.Clamp(alpha, 0, 255);
+            int x = (int)Math.Round(egg.X);
+            int y = (int)Math.Round(egg.Y);
+            Color32 shell = GameModel.ColorFor(egg.Kind);
+
+            // Shadow cast on the ground.
+            canvas.SetColor(GameModel.Dark, a);
+            canvas.FillOval(x, y, 8, 4);
+
+            // Spilt yolk between the shell halves.
+            canvas.SetColor(Yolk, a);
+            canvas.FillOval(x, y + 1, 6, 4);
+
+            // Left shell half.
+            canvas.SetColor(shell, a);
+            canvas.FillOval(x - 2, y, 4, 4);
+            // Right shell half.
+            canvas.FillOval(x + 3, y, 4, 4);
+
+            // Zig-zag crack seam across the broken edge of each half.
+            canvas.SetColor(GameModel.Dark, a);
+            canvas.FillRect(x - 2, y + 1, 2, 1);
+            canvas.FillRect(x - 3, y + 3, 2, 1);
+            canvas.FillRect(x + 5, y + 1, 2, 1);
+            canvas.FillRect(x + 6, y + 3, 2, 1);
         }
 
         // ══════════════════════════════════════════════════════════════════════
