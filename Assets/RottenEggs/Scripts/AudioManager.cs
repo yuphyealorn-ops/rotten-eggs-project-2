@@ -64,14 +64,20 @@ namespace RottenEggs
         /// the bundled WAVs above. These live in Resources because the game
         /// object is built at runtime and has no Inspector slots; anything
         /// missing here simply falls back to its StreamingAssets counterpart.
+        /// A slot with several entries picks one at random each time it starts,
+        /// never the same one twice running, so gameplay music does not repeat.
         /// </summary>
-        private static readonly Dictionary<Music, string> MusicResources = new Dictionary<Music, string>
+        private static readonly Dictionary<Music, string[]> MusicResources = new Dictionary<Music, string[]>
         {
-            { Music.Menu, "Audio/titlescreensong" }
+            { Music.Menu, new[] { "Audio/titlescreensong" } },
+            { Music.Game, new[] { "Audio/boogie", "Audio/pixel-drift" } }
         };
 
+        private static readonly System.Random musicPicker = new System.Random();
+
         private readonly Dictionary<Sfx, AudioSource> sfxSources = new Dictionary<Sfx, AudioSource>();
-        private readonly Dictionary<Music, AudioClip> musicClips = new Dictionary<Music, AudioClip>();
+        private readonly Dictionary<Music, List<AudioClip>> musicClips = new Dictionary<Music, List<AudioClip>>();
+        private readonly Dictionary<Music, int> lastMusicPick = new Dictionary<Music, int>();
         private AudioSource musicSource;
         private float volume = DefaultVolume;
         private bool muted;
@@ -145,13 +151,13 @@ namespace RottenEggs
             }
 
             currentMusicTrack = track;
-            AudioClip clip;
-            if (!CanPlay() || musicSource == null || !musicClips.TryGetValue(track, out clip) || clip == null)
+            List<AudioClip> clips;
+            if (!CanPlay() || musicSource == null || !musicClips.TryGetValue(track, out clips) || clips.Count == 0)
             {
                 return;
             }
 
-            musicSource.clip = clip;
+            musicSource.clip = PickClip(track, clips);
             musicSource.loop = true;
             musicSource.time = 0f;
             musicSource.volume = volume * MusicLevel;
@@ -284,15 +290,19 @@ namespace RottenEggs
 
             foreach (KeyValuePair<Music, string> entry in MusicFiles)
             {
-                AudioClip clip = LoadImportedClip(entry.Key);
-                if (clip == null)
+                List<AudioClip> clips = LoadImportedClips(entry.Key);
+                if (clips.Count == 0)
                 {
-                    clip = LoadClip(entry.Value);
+                    AudioClip bundled = LoadClip(entry.Value);
+                    if (bundled != null)
+                    {
+                        clips.Add(bundled);
+                    }
                 }
 
-                if (clip != null)
+                if (clips.Count > 0)
                 {
-                    musicClips[entry.Key] = clip;
+                    musicClips[entry.Key] = clips;
                 }
             }
 
@@ -317,25 +327,55 @@ namespace RottenEggs
         }
 
         /// <summary>
-        /// Fetches a track that Unity imported normally, or null when the track
-        /// has no entry in <see cref="MusicResources"/> or the file is absent.
+        /// Fetches every track Unity imported normally for this slot. The list is
+        /// empty when the slot has no entry in <see cref="MusicResources"/> or
+        /// none of its files are present.
         /// </summary>
-        private AudioClip LoadImportedClip(Music track)
+        private List<AudioClip> LoadImportedClips(Music track)
         {
-            string resourcePath;
-            if (!MusicResources.TryGetValue(track, out resourcePath))
+            List<AudioClip> clips = new List<AudioClip>();
+            string[] resourcePaths;
+            if (!MusicResources.TryGetValue(track, out resourcePaths))
             {
-                return null;
+                return clips;
             }
 
-            AudioClip clip = Resources.Load<AudioClip>(resourcePath);
-            if (clip == null)
+            foreach (string resourcePath in resourcePaths)
             {
-                WarnOnce("no imported track at Resources/" + resourcePath
-                         + ", using the bundled loop instead", null);
+                AudioClip clip = Resources.Load<AudioClip>(resourcePath);
+                if (clip != null)
+                {
+                    clips.Add(clip);
+                }
+                else
+                {
+                    WarnOnce("no imported track at Resources/" + resourcePath, null);
+                }
             }
 
-            return clip;
+            return clips;
+        }
+
+        /// <summary>
+        /// Chooses which of a slot's clips to play next: the only one if there is
+        /// one, otherwise a random one that is not the clip played last time.
+        /// </summary>
+        private AudioClip PickClip(Music track, List<AudioClip> clips)
+        {
+            int index = 0;
+            if (clips.Count > 1)
+            {
+                int previous;
+                bool hasPrevious = lastMusicPick.TryGetValue(track, out previous);
+                do
+                {
+                    index = musicPicker.Next(clips.Count);
+                }
+                while (hasPrevious && index == previous);
+            }
+
+            lastMusicPick[track] = index;
+            return clips[index];
         }
 
         private AudioClip LoadClip(string filename)
