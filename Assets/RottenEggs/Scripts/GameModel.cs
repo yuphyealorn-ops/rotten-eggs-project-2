@@ -282,6 +282,29 @@ namespace RottenEggs
             }
         }
 
+        /// <summary>
+        /// A shell left behind when a falling egg smashes on the ground. It is a
+        /// short-lived visual only, so it replaces the old particle "explosion"
+        /// with a readable crack while the miss penalty is still applied.
+        /// </summary>
+        public sealed class CrackedEgg
+        {
+            public readonly EggKind Kind;
+            public readonly double X;
+            public readonly double Y;
+            public double Life;
+            public readonly double MaxLife;
+
+            public CrackedEgg(EggKind kind, double x, double y, double life)
+            {
+                Kind = kind;
+                X = x;
+                Y = y;
+                Life = life;
+                MaxLife = life;
+            }
+        }
+
         public sealed class Shot
         {
             public double X;
@@ -328,6 +351,7 @@ namespace RottenEggs
         public readonly List<Chicken> Chickens = new List<Chicken>();
         public readonly List<FallingEgg> FallingEggs = new List<FallingEgg>();
         public readonly List<Shot> Shots = new List<Shot>();
+        public readonly List<CrackedEgg> CrackedEggs = new List<CrackedEgg>();
         public readonly List<Particle> Particles = new List<Particle>();
         public readonly List<GameEvent> Events = new List<GameEvent>();
         public readonly double[] SpawnTimers = new double[2];
@@ -404,6 +428,7 @@ namespace RottenEggs
             FallingEggs.Clear();
             Shots.Clear();
             Particles.Clear();
+            CrackedEggs.Clear();
             Events.Clear();
 
             ResetPlayer(Players[0]);
@@ -458,6 +483,7 @@ namespace RottenEggs
         {
             double dt = Math.Max(0, Math.Min(rawDt, 0.05));
             UpdateParticles(dt);
+            UpdateCrackedEggs(dt);
             ShakeTime = Math.Max(0, ShakeTime - dt);
             foreach (PlayerState player in Players)
             {
@@ -878,8 +904,7 @@ namespace RottenEggs
 
         private void MissEgg(FallingEgg egg, PlayerState target)
         {
-            Color32 color = ColorFor(egg.Kind);
-            SpawnParticles(egg.X, GroundY - 2, color, 10, 95);
+            SpawnCrackedEgg(egg);
             ShakeTime = 0.12;
 
             if (egg.Kind != EggKind.Normal)
@@ -1055,6 +1080,31 @@ namespace RottenEggs
                 particle.Y += particle.Vy * dt;
                 particle.Vy += 95 * dt;
             }
+        }
+
+        /// <summary>
+        /// Ages and removes the cracked shells left by eggs that hit the ground.
+        /// </summary>
+        private void UpdateCrackedEggs(double dt)
+        {
+            for (int i = CrackedEggs.Count - 1; i >= 0; i--)
+            {
+                CrackedEgg egg = CrackedEggs[i];
+                egg.Life -= dt;
+                if (egg.Life <= 0)
+                {
+                    CrackedEggs.RemoveAt(i);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Leaves a cracked shell on the ground where an egg smashed, keeping the
+        /// color of the egg that broke so the source of the miss stays readable.
+        /// </summary>
+        private void SpawnCrackedEgg(FallingEgg egg)
+        {
+            CrackedEggs.Add(new CrackedEgg(egg.Kind, egg.X, GroundY + 1, 1.1));
         }
 
         private void SpawnParticles(double x, double y, Color32 color, int count, double strength)
