@@ -31,6 +31,14 @@ namespace RottenEggs
         private int clipMaxX;
         private int clipMaxY;
 
+        // Per-channel multiplier (0-255) applied to every colour while set, so
+        // a whole object can be drawn "in the scene's light" without touching
+        // its own palette. Cleared between objects.
+        private int shadeR = 255;
+        private int shadeG = 255;
+        private int shadeB = 255;
+        private bool shaded;
+
         public PixelCanvas(int width, int height)
         {
             Width = width;
@@ -77,6 +85,27 @@ namespace RottenEggs
             translateY = 0;
         }
 
+        /// <summary>
+        /// Darkens and tints everything drawn until <see cref="ClearShade"/>.
+        /// 255 on a channel leaves it unchanged. Sprites, fills and polygons
+        /// all pass through the same blend, so one call covers a whole object.
+        /// </summary>
+        public void SetShade(byte r, byte g, byte b)
+        {
+            shadeR = r;
+            shadeG = g;
+            shadeB = b;
+            shaded = r != 255 || g != 255 || b != 255;
+        }
+
+        public void ClearShade()
+        {
+            shadeR = 255;
+            shadeG = 255;
+            shadeB = 255;
+            shaded = false;
+        }
+
         public void SetClip(int x, int y, int width, int height)
         {
             clipMinX = Math.Max(0, x + translateX);
@@ -118,25 +147,35 @@ namespace RottenEggs
                 return;
             }
 
-            int index = Index(px, py);
-            if (color.a == 255)
-            {
-                pixels[index] = color;
-                return;
-            }
-
             if (color.a == 0)
             {
                 return;
             }
 
+            Color32 source = color;
+            if (shaded)
+            {
+                source = new Color32(
+                    (byte)(source.r * shadeR / 255),
+                    (byte)(source.g * shadeG / 255),
+                    (byte)(source.b * shadeB / 255),
+                    source.a);
+            }
+
+            int index = Index(px, py);
+            if (source.a == 255)
+            {
+                pixels[index] = source;
+                return;
+            }
+
             Color32 destination = pixels[index];
-            int alpha = color.a;
+            int alpha = source.a;
             int inverse = 255 - alpha;
             pixels[index] = new Color32(
-                (byte)((color.r * alpha + destination.r * inverse) / 255),
-                (byte)((color.g * alpha + destination.g * inverse) / 255),
-                (byte)((color.b * alpha + destination.b * inverse) / 255),
+                (byte)((source.r * alpha + destination.r * inverse) / 255),
+                (byte)((source.g * alpha + destination.g * inverse) / 255),
+                (byte)((source.b * alpha + destination.b * inverse) / 255),
                 255);
         }
 

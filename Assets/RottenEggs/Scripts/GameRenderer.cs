@@ -40,6 +40,16 @@ namespace RottenEggs
         /// <summary>The chicken frames are 20 x 21, drawn at whole-number scale like the rest.</summary>
         private const int SpriteScale = 2;
 
+        /// <summary>
+        /// Tint applied to chickens, perches and baskets so they sit in the
+        /// backdrop's evening light rather than floating over it at full
+        /// brightness. Roughly 20% darker with the green pulled down, which
+        /// reads as the same warm, low sun that lights the painting.
+        /// </summary>
+        private const byte SunsetShadeR = 209;
+        private const byte SunsetShadeG = 184;
+        private const byte SunsetShadeB = 179;
+
         // ── Font styles ───────────────────────────────────────────────────────
         private static readonly PixelFont.Style FontTiny   = new PixelFont.Style(1, 1, 0);
         private static readonly PixelFont.Style FontSmall  = new PixelFont.Style(1, 2, 0);
@@ -212,17 +222,92 @@ namespace RottenEggs
         // Menu
         // ══════════════════════════════════════════════════════════════════════
 
+        // ── Menu vignette timing ─────────────────────────────────────────────
+        // One chicken per side, in the strips the menu panel leaves uncovered,
+        // acting out a full fight: land, take four egg hits, die, vanish, and
+        // come back. The two sides run half a cycle apart so something is
+        // always moving. Four hits matches a real chicken's hit points.
+        private const double VignettePeriod  = 7.6;
+        private const double VignetteArrive  = 0.6;    // Jumping clip on landing
+        private const double VignetteEggAir  = 0.35;   // seconds an egg takes to reach the chicken
+        private const double VignetteVanish  = 7.2;    // dead chicken disappears here until the loop restarts
+        private static readonly double[] VignetteHits = { 2.0, 3.5, 5.0, 6.5 };
+
+        private const int VignettePerchTop = 156;
+        private const int VignettePerchHalf = 26;
+
         private void DrawMenuScene()
         {
-            int menuPerchY = (int)(43 + GameModel.ChickenH);
-            DrawPerch(47,  103, menuPerchY);
-            DrawPerch(377, 433, menuPerchY);
-            DrawChicken(75,  43, AnimState.Idle, _clock,         true);
-            DrawChicken(405, 43, AnimState.Idle, _clock + 0.25, false);
-            DrawEgg(60,  115, EggKind.Normal, false);
-            DrawEgg(415, 137, EggKind.Golden, false);
-            DrawBasket(84,  (int)GameModel.BasketY, GameModel.Cyan, 0, false);
-            DrawBasket(348, (int)GameModel.BasketY, GameModel.Pink, 0, false);
+            DrawMenuVignette(32,  true,  _clock);
+            DrawMenuVignette(448, false, _clock + VignettePeriod / 2);
+        }
+
+        private void DrawMenuVignette(int centerX, bool facingRight, double clock)
+        {
+            double t = clock % VignettePeriod;
+            int chickenTop = VignettePerchTop - (int)GameModel.ChickenH;
+            int chickenMidY = chickenTop + (int)GameModel.ChickenH / 2;
+
+            DrawPerch(centerX - VignettePerchHalf, centerX + VignettePerchHalf, VignettePerchTop);
+
+            // How many hits have landed so far, and when the latest one did.
+            int hp = 4;
+            double lastHit = -1;
+            foreach (double hit in VignetteHits)
+            {
+                if (t >= hit)
+                {
+                    hp--;
+                    lastHit = hit;
+                }
+            }
+
+            bool dead = hp <= 0;
+            if (dead && t >= VignetteVanish)
+            {
+                return;
+            }
+
+            AnimState state;
+            double animTime;
+            if (t < VignetteArrive)
+            {
+                state = AnimState.Jumping;
+                animTime = t;
+            }
+            else if (dead)
+            {
+                state = AnimState.Die;
+                animTime = t - lastHit;
+            }
+            else if (lastHit >= 0 && t - lastHit < GameModel.DamageAnimSeconds)
+            {
+                state = AnimState.Damage;
+                animTime = t - lastHit;
+            }
+            else
+            {
+                state = AnimState.Idle;
+                animTime = t;
+            }
+
+            DrawChicken(centerX, chickenTop, state, animTime, facingRight);
+            if (!dead)
+            {
+                DrawHealthPips(hp, centerX, chickenTop - 8);
+            }
+
+            // An egg on its way up to the next hit, thrown from below the screen.
+            foreach (double hit in VignetteHits)
+            {
+                double launch = hit - VignetteEggAir;
+                if (t >= launch && t < hit)
+                {
+                    double progress = (t - launch) / VignetteEggAir;
+                    int eggY = (int)Math.Round(GameModel.WorldH + (chickenMidY - GameModel.WorldH) * progress);
+                    DrawEgg(centerX - (int)GameModel.EggW / 2, eggY, EggKind.Normal, true);
+                }
+            }
         }
 
         private void DrawMenuOverlay(AudioManager audio, int menuSelection)
@@ -663,7 +748,9 @@ namespace RottenEggs
             // The artwork faces right; a left-bound chicken is mirrored in place.
             int nearX = facingRight ? x               : x + drawWidth;
             int farX  = facingRight ? x + drawWidth   : x;
+            canvas.SetShade(SunsetShadeR, SunsetShadeG, SunsetShadeB);
             canvas.DrawSprite(frame, nearX, y, farX, y + drawHeight);
+            canvas.ClearShade();
         }
 
         /// <summary>Wooden perch a chicken patrols along, drawn under its whole lane.</summary>
@@ -679,6 +766,7 @@ namespace RottenEggs
         {
             int width  = right - left;
             int height = (int)GameModel.PerchH;
+            canvas.SetShade(SunsetShadeR, SunsetShadeG, SunsetShadeB);
             canvas.SetColor(GameModel.Dark);
             canvas.FillRect(left, top, width, height);
             canvas.SetColor(WoodLight);
@@ -702,6 +790,7 @@ namespace RottenEggs
             canvas.SetColor(WoodDark);
             canvas.FillRect(left  + 5, top + height, 2, 3);
             canvas.FillRect(right - 7, top + height, 2, 3);
+            canvas.ClearShade();
         }
 
         private void DrawHealthPips(int hp, double centerX, int y)
@@ -759,6 +848,9 @@ namespace RottenEggs
 
         private void DrawBasket(int x, int y, Color32 accent, int ammo, bool boosted)
         {
+            // The basket body takes the scene's light; the eggs stacked in it
+            // are gameplay information and stay at full brightness below.
+            canvas.SetShade(SunsetShadeR, SunsetShadeG, SunsetShadeB);
             if (boosted)
             {
                 canvas.SetColor(accent, 130);
@@ -786,6 +878,7 @@ namespace RottenEggs
             }
 
             canvas.DrawArc(x + 10, y - 10, 28, 22, 180, -180, 2);
+            canvas.ClearShade();
 
             int visibleAmmo = Math.Min(5, ammo);
             for (int i = 0; i < visibleAmmo; i++)
@@ -962,14 +1055,12 @@ namespace RottenEggs
         }
 
         /// <summary>
-        /// Day 3: draws a small dark backing panel behind the heart group,
-        /// giving a coin-op credit-display feel.
+        /// The heart group sits directly on the top panel. The Day 3 backing box
+        /// was dropped once the hearts gained their own dark silhouette and
+        /// border, which give them all the contrast they need.
         /// </summary>
         private void DrawHeartsWithBox(int startX, int y, int halfUnits)
         {
-            // Backing box: 56 px wide covers 3 hearts (each ~14 px wide + 4 px gap)
-            canvas.SetColor(GameModel.Dark);
-            canvas.FillRect(startX - 2, y - 2, 56, 19);
             DrawHearts(startX, y, halfUnits);
         }
 
