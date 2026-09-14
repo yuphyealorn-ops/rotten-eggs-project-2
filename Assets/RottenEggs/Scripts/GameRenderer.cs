@@ -267,6 +267,15 @@ namespace RottenEggs
                 : "AUDIO " + Mathf.RoundToInt(audio.GetVolume() * 100) + "%";
             DrawCenteredText("M MUTE  •  -/+ VOLUME  •  " + audioText, 240, 220,
                 audio.IsMuted() ? GameModel.Pink : GameModel.Gold, Black, FontTiny);
+
+            // ── Reference credits (menu attribution per course requirement) ──
+            // Full details live in CREDITS.md. The external references are the
+            // royalty-free pixel-art chicken sprite pack (Sprites/License.txt),
+            // the Uppbeat music tracks, and the original Java game this is
+            // ported from. SFX and the pixel font were made for this project.
+            DrawShadowText(
+                "CREDITS: chicken sprites (pixel-art pack)  •  music (Uppbeat)  •  Java original",
+                66, 14, Muted, Black, FontTiny);
         }
 
         private void DrawMenuOption(
