@@ -272,9 +272,11 @@ namespace RottenEggs
             // The full credit string is wider than the canvas, so it scrolls
             // continuously right-to-left like an arcade marquee, which lets the
             // whole line be read. A translucent strip keeps it legible over art.
+            // Main credits pulled from CREDITS.md (Uppbeat licence codes and the
+            // chicken-pack licence live in CREDITS.md / Sprites/License.txt).
             const string creditsText =
-                "CREDITS: chicken sprites (pixel-art pack)  •  music (Uppbeat)  •  "
-                + "ported from the Java original (gamedev project 2)  •  "
+                "CREDITS:  MUSIC by Uppbeat (tracks: boogie & pixel-drift, uppbeat.io, free for creators)  •  "
+                + "ART: pixel-art chicken sprite pack (royalty-free)  •  "
                 + "SFX & pixel font made by the team";
             double creditsWidth = PixelFont.TextWidth(creditsText, FontTiny);
             double travel       = GameModel.WorldW + creditsWidth;
