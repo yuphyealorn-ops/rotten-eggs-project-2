@@ -268,14 +268,21 @@ namespace RottenEggs
             DrawCenteredText("M MUTE  •  -/+ VOLUME  •  " + audioText, 240, 220,
                 audio.IsMuted() ? GameModel.Pink : GameModel.Gold, Black, FontTiny);
 
-            // ── Reference credits (menu attribution per course requirement) ──
-            // Full details live in CREDITS.md. The external references are the
-            // royalty-free pixel-art chicken sprite pack (Sprites/License.txt),
-            // the Uppbeat music tracks, and the original Java game this is
-            // ported from. SFX and the pixel font were made for this project.
-            DrawShadowText(
-                "CREDITS: chicken sprites (pixel-art pack)  •  music (Uppbeat)  •  Java original",
-                66, 14, Muted, Black, FontTiny);
+            // ── Scrolling credits ticker (menu attribution, full text) ────────
+            // The full credit string is wider than the canvas, so it scrolls
+            // continuously right-to-left like an arcade marquee, which lets the
+            // whole line be read. A translucent strip keeps it legible over art.
+            const string creditsText =
+                "CREDITS: chicken sprites (pixel-art pack)  •  music (Uppbeat)  •  "
+                + "ported from the Java original (gamedev project 2)  •  "
+                + "SFX & pixel font made by the team";
+            double creditsWidth = PixelFont.TextWidth(creditsText, FontTiny);
+            double travel       = GameModel.WorldW + creditsWidth;
+            double progress     = (_clock * 30.0) % travel;   // 30 px per second
+            int creditsX        = GameModel.WorldW - (int)Math.Round(progress);
+            canvas.SetColor(15, 29, 39, 150);
+            canvas.FillRect(0, 6, GameModel.WorldW, 8);
+            DrawShadowText(creditsText, creditsX, 14, Muted, Black, FontTiny);
         }
 
         private void DrawMenuOption(
