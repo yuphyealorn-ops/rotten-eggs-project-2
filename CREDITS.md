@@ -13,13 +13,16 @@ Music from #Uppbeat (free for Creators!):
 https://uppbeat.io/t/pecan-pie/pixel-drift
 License code: 7KU8TDXSLIEU4LBY
 
+| Asset | Creator | Source | Licence |
+|---|---|---|---|
+| Title screen song | Rest! (Ricardo Cuello) | https://richarrest.itch.io/cozy-sim-music-pack-town-life | CC BY-SA 4.0 |
+
 ## Art
 
 | Asset | Creator | Source | Licence |
 |---|---|---|---|
-| Farm sunset backdrop | | | |
-| Heart icons | | | |
-| Chicken animation | | | |
+| Heart icons | VampireGirl | https://fliflifly.itch.io/hearts-and-health-bar | CC-0 |
+| Chicken animation | vmiinv | https://vmiinv.itch.io/chickenpack-asset | |
 
 ## Made for this project
 
