@@ -22,8 +22,8 @@ namespace RottenEggs
                 "single mode must start with three chickens");
             Require(model.Chickens.All(chicken => chicken.Hp == 4),
                 "each chicken must start with four HP");
-            Require(model.Player(0).LivesHalf == 6 && model.Player(0).Ammo == 0,
-                "single mode must start with three hearts and empty ammo");
+            Require(model.Player(0).LivesHalf == GameModel.SingleMaxLivesHalf && model.Player(0).Ammo == 0,
+                "single mode must start with five hearts and empty ammo");
             checks += 3;
 
             GameModel.Chicken movingFirst = model.Chickens[0];
@@ -149,36 +149,147 @@ namespace RottenEggs
                 "the jump clip must play once and hand the chicken back to walking");
             checks++;
 
-            foreach (GameModel.Chicken chicken in model.Chickens)
+            GameModel.Chicken[] stageOne = model.Chickens.ToArray();
+            foreach (GameModel.Chicken chicken in stageOne)
             {
                 while (chicken.Alive())
                 {
                     model.ApplyChickenHit(chicken);
                 }
+
+                model.Update(0, 0, 0);
             }
 
-            Require(model.Phase == Phase.Won, "defeating all single-player chickens must win");
+            Require(model.CurrentStage == Stage.Stage2 && model.Phase == Phase.Playing,
+                "clearing the three stage-1 chickens must move the run on to stage 2");
+            Require(model.Player(0).Score > 0 && model.Player(0).LivesHalf > 0
+                    && model.Player(0).LivesHalf < GameModel.SingleMaxLivesHalf,
+                "a stage clear must carry the run's score and hearts over, not reset them");
+            checks += 2;
+
+            // ── Stages: stage 2 respawns, the boss takes eight hits ───────────
+            GameModel stages = new GameModel(new Random(53));
+            stages.StartRound(Mode.Single, Stage.Stage2);
+            stages.SpawnTimers[0] = 999;
+            Require(stages.CurrentStage == Stage.Stage2
+                    && stages.Chickens.Count == 3
+                    && stages.Chickens.All(chicken => chicken.CanRespawn),
+                "stage 2 must line up three chickens that can respawn");
+            checks++;
+
+            GameModel.Chicken respawner = stages.Chickens[0];
+            while (respawner.Alive())
+            {
+                stages.ApplyChickenHit(respawner);
+            }
+
+            Require(!respawner.Alive() && respawner.RespawnTimer > 0,
+                "a downed stage-2 chicken must start its respawn countdown");
+            checks++;
+
+            for (int i = 0; i < 120; i++)
+            {
+                stages.Update(0.05, 0, 0);
+            }
+
+            Require(respawner.Alive() && respawner.Hp == 4,
+                "a stage-2 chicken must climb back onto its perch at full health");
+            checks++;
+
+            int stageGuard = 0;
+            while (stages.CurrentStage == Stage.Stage2 && stageGuard < 12)
+            {
+                stageGuard++;
+                GameModel.Chicken target = stages.Chickens.First(chicken => chicken.Alive());
+                while (target.Alive())
+                {
+                    stages.ApplyChickenHit(target);
+                }
+
+                stages.Update(0, 0, 0);
+                if (stages.CurrentStage != Stage.Stage2)
+                {
+                    break;
+                }
+
+                // Let any downed chicken climb back before the next knockdown, which
+                // is what makes stage 2 a race against the respawn clock.
+                for (int i = 0; i < 110; i++)
+                {
+                    stages.SpawnTimers[0] = 999;
+                    stages.Update(0.05, 0, 0);
+                }
+            }
+
+            Require(stages.CurrentStage == Stage.BossStage && stages.Phase == Phase.Playing,
+                "six stage-2 knockdowns must open the boss stage");
+            Require(stages.Chickens.Count == 1 && stages.Chickens[0].IsBoss && stages.Chickens[0].Hp == 8,
+                "the boss stage must roll out a single eight-hit boss");
+            checks += 2;
+
+            GameModel.Chicken boss = stages.Chickens[0];
+            for (int i = 0; i < 7; i++)
+            {
+                stages.ApplyChickenHit(boss);
+            }
+
+            Require(boss.Alive() && boss.Hp == 1,
+                "the boss must still be standing after seven hits");
+            checks++;
+
+            stages.ApplyChickenHit(boss);
+            stages.Update(0, 0, 0);
+            Require(stages.Phase == Phase.Won && stages.WinnerPlayer == 1,
+                "the eighth hit must clear the whole run");
+            checks++;
+
+            // ── Shields and the slow-down field ───────────────────────────────
+            GameModel power = new GameModel(new Random(61));
+            power.StartRound(Mode.Single);
+            power.SpawnTimers[0] = 999;
+            for (int i = 0; i < 3; i++)
+            {
+                PlaceCatch(power, 0, EggKind.Shield);
+                power.Update(0, 0, 0);
+            }
+
+            Require(power.Player(0).ShieldCount == 3, "shield eggs must bank up to three shields");
+            checks++;
+
+            int shieldedLives = power.Player(0).LivesHalf;
+            PlaceMiss(power, 0, EggKind.Normal, 20);
+            power.Update(0, 0, 0);
+            Require(power.Player(0).LivesHalf == shieldedLives && power.Player(0).ShieldCount == 2,
+                "a banked shield must absorb a missed egg instead of half a heart");
+            checks++;
+
+            PlaceCatch(power, 0, EggKind.SlowDown);
+            power.Update(0, 0, 0);
+            GameModel.FallingEgg slowedEgg = new GameModel.FallingEgg(EggKind.Normal, 0, 0, 100, 100);
+            Require(Math.Abs(power.Player(0).SlowDownTimer - 5.0) < 1e-9
+                    && power.FallSpeedFor(slowedEgg) < power.BaseFallSpeed(),
+                "a slow-down egg must last five seconds and halve the falling eggs' speed");
             checks++;
 
             GameModel loss = new GameModel(new Random(11));
             loss.StartRound(Mode.Single);
             loss.SpawnTimers[0] = 999;
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < GameModel.SingleMaxLivesHalf; i++)
             {
                 PlaceMiss(loss, 0, EggKind.Normal, 10 + i * 12);
             }
 
             loss.Update(0, 0, 0);
             Require(loss.Phase == Phase.Lost && loss.Player(0).LivesHalf == 0,
-                "six single-player misses must end the round");
+                "ten single-player misses must end the round");
             checks++;
 
             model.StartRound(Mode.Duo);
             model.SpawnTimers[0] = 999;
             model.SpawnTimers[1] = 999;
             Require(model.Mode == Mode.Duo
-                    && model.Player(0).LivesHalf == 6
-                    && model.Player(1).LivesHalf == 6,
+                    && model.Player(0).LivesHalf == GameModel.DuoMaxLivesHalf
+                    && model.Player(1).LivesHalf == GameModel.DuoMaxLivesHalf,
                 "Duo must reset two independent players");
             Require(model.Player(0).BasketX < GameModel.WorldW / 2.0
                     && model.Player(1).BasketX > GameModel.WorldW / 2.0,
@@ -318,8 +429,8 @@ namespace RottenEggs
             model.RestartCurrentMode();
             Require(model.Mode == Mode.Duo
                     && model.Phase == Phase.Playing
-                    && model.Player(0).LivesHalf == 6
-                    && model.Player(1).LivesHalf == 6
+                    && model.Player(0).LivesHalf == GameModel.DuoMaxLivesHalf
+                    && model.Player(1).LivesHalf == GameModel.DuoMaxLivesHalf
                     && model.FallingEggs.Count == 0
                     && model.Chickens.All(chicken =>
                         chicken.CenterX == chicken.StartX && chicken.Direction == chicken.StartDirection),

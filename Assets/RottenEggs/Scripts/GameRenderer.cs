@@ -15,6 +15,10 @@ namespace RottenEggs
     ///   - HUD: 1UP / 2UP labels, hearts backing box, flashing power labels, FEVER blink
     ///   - Result screen: corner brackets, blinking GAME OVER text for loss
     ///   - Duo divider: double solid line instead of dashed
+    ///
+    /// Single-player stage additions: the chained stage run (classic, respawn,
+    /// boss), the stage goal readout, the respawn countdown, the boss health bar
+    /// and the shield / slow-down egg artwork.
     /// </summary>
     public sealed class GameRenderer
     {
@@ -347,7 +351,7 @@ namespace RottenEggs
 
             // Menu options (original positions preserved)
             DrawMenuOption(92, 105, 296, 43, 0, menuSelection,
-                "1  SINGLE PLAYER", "CATCH • THROW • LEAD MOVING TARGETS");
+                "1  SINGLE PLAYER", "CATCH • THROW • CLEAR ALL " + GameModel.StageCount + " STAGES");
             DrawMenuOption(92, 154, 296, 43, 1, menuSelection,
                 "2  DUO PLAYER", "P1 A/D • P2 ARROWS • POWER-EGG SABOTAGE");
 
@@ -361,6 +365,19 @@ namespace RottenEggs
                 : "AUDIO " + Mathf.RoundToInt(audio.GetVolume() * 100) + "%";
             DrawCenteredText("M MUTE  •  -/+ VOLUME  •  " + audioText, 240, 220,
                 audio.IsMuted() ? GameModel.Pink : GameModel.Gold, Black, FontTiny);
+
+            // Developer credit on the open ground below the panel — a slim dark
+            // plaque matched to the panel width keeps the text readable over the
+            // painted dirt while leaving the fighting chickens at the edges clear.
+            canvas.SetColor(15, 29, 39, 220);
+            canvas.FillRect(64, 234, 352, 28);
+            canvas.SetColor(GameModel.Pink);
+            canvas.FillRect(64, 234, 18, 2);
+            canvas.FillRect(64, 234, 2, 8);
+            canvas.FillRect(416 - 18, 234, 18, 2);
+            canvas.FillRect(416 - 2, 234, 2, 8);
+            DrawCenteredText("A GAME BY", 240, 245, Muted, Black, FontTiny);
+            DrawCenteredText("YE HTET AUNG  •  CHANYUPHYEA LORN", 240, 257, White, Black, FontTiny);
         }
 
         private void DrawMenuOption(
@@ -420,14 +437,30 @@ namespace RottenEggs
 
             foreach (GameModel.Chicken chicken in model.Chickens)
             {
-                DrawChicken(chicken.CenterX, chicken.Y, chicken.Anim, chicken.AnimTime, chicken.Facing > 0);
+                DrawChicken(chicken.CenterX, chicken.Y, chicken.Anim, chicken.AnimTime,
+                    chicken.Facing > 0, ChickenDrawScale(chicken));
                 if (chicken.Alive())
                 {
-                    DrawHealthPips(chicken.Hp, chicken.CenterX, (int)chicken.Y - 8);
+                    if (chicken.IsBoss)
+                    {
+                        DrawBossHealthBar(chicken.Hp, 8, chicken.CenterX, (int)chicken.Y - 8);
+                    }
+                    else
+                    {
+                        DrawHealthPips(chicken.Hp, chicken.CenterX, (int)chicken.Y - 8);
+                    }
+                }
+                else if (chicken.IsRespawning())
+                {
+                    // Stage 2: the countdown says when the chicken is back on its perch.
+                    DrawCenteredText("KO " + Mathf.CeilToInt((float)chicken.RespawnTimer),
+                        (int)Math.Round(chicken.CenterX), (int)chicken.Y + 20,
+                        White, GameModel.Dark, FontSmall);
                 }
                 else
                 {
-                    DrawCenteredText("KO", (int)Math.Round(chicken.CenterX), (int)chicken.Y + 20,
+                    DrawCenteredText("KO", (int)Math.Round(chicken.CenterX),
+                        (int)chicken.Y + (chicken.IsBoss ? 74 : 20),
                         White, GameModel.Dark, FontSmall);
                 }
             }
@@ -466,7 +499,8 @@ namespace RottenEggs
 
             foreach (GameModel.Chicken chicken in model.Chickens)
             {
-                DrawChicken(chicken.CenterX, chicken.Y, chicken.Anim, chicken.AnimTime, chicken.Facing > 0);
+                DrawChicken(chicken.CenterX, chicken.Y, chicken.Anim, chicken.AnimTime,
+                    chicken.Facing > 0, ChickenDrawScale(chicken));
             }
 
             GameModel.PlayerState one = model.Player(0);
@@ -650,6 +684,34 @@ namespace RottenEggs
                     }
                     break;
                 }
+
+                case EggKind.Shield:
+                {
+                    // Mint brackets around the egg that slowly breathe outward.
+                    int grow = (int)((Math.Sin(_clock * 4.0) + 1.0) * 0.5 * 2.0);
+                    canvas.SetColor(GameModel.Mint, 220);
+                    canvas.FillRect(x - 6,          y - 2,          5,            1);
+                    canvas.FillRect(x - 6,          y - 2,          1,            4 + grow);
+                    canvas.FillRect(x + 10,         y - 2,          5,            1);
+                    canvas.FillRect(x + 14,         y - 2,          1,            4 + grow);
+                    canvas.FillRect(x - 6,          y + 10,         5,            1);
+                    canvas.FillRect(x - 6,          y + 10 - grow,  1,            4 + grow);
+                    canvas.FillRect(x + 10,         y + 10,         5,            1);
+                    canvas.FillRect(x + 14,         y + 10 - grow,  1,            4 + grow);
+                    break;
+                }
+
+                case EggKind.SlowDown:
+                {
+                    // Ice flecks that drift upward, as if the egg is holding time back.
+                    int drift = (int)(_clock * 4.0) % 6;
+                    canvas.SetColor(GameModel.Ice, 205);
+                    canvas.FillRect(x - 6, y + 8 - drift, 2, 2);
+                    canvas.FillRect(x + 13, y + 6 - drift, 2, 2);
+                    canvas.FillRect(x + 2, y - 4 - drift / 2, 2, 2);
+                    canvas.FillRect(x + 9, y + 13 - drift, 2, 2);
+                    break;
+                }
             }
         }
 
@@ -697,6 +759,20 @@ namespace RottenEggs
                     canvas.FillRect(x + 2, y + 6, 1, 1);
                     canvas.FillRect(x + 6, y + 6, 1, 1);
                     break;
+                case EggKind.Shield:
+                    canvas.FillRect(x + 2, y + 2, 5, 1);
+                    canvas.FillRect(x + 2, y + 3, 5, 4);
+                    canvas.FillRect(x + 3, y + 7, 3, 1);
+                    canvas.FillRect(x + 4, y + 8, 1, 1);
+                    break;
+                case EggKind.SlowDown:
+                    canvas.FillRect(x + 2, y + 2, 5, 1);
+                    canvas.FillRect(x + 2, y + 8, 5, 1);
+                    canvas.FillRect(x + 3, y + 3, 3, 1);
+                    canvas.FillRect(x + 4, y + 4, 1, 2);
+                    canvas.FillRect(x + 3, y + 6, 3, 1);
+                    canvas.FillRect(x + 4, y + 7, 1, 1);
+                    break;
             }
         }
 
@@ -738,11 +814,12 @@ namespace RottenEggs
         /// model's own animation clock, so a one-shot clip such as the death
         /// sequence stops on its final frame instead of looping forever.
         /// </summary>
-        private void DrawChicken(double centerX, double topY, AnimState state, double animTime, bool facingRight)
+        private void DrawChicken(double centerX, double topY, AnimState state, double animTime, bool facingRight,
+                                 int scale = SpriteScale)
         {
             SpriteFrame frame     = sprites.Animate(state).FrameAt(animTime, state.Loops());
-            int         drawWidth  = frame.Width  * SpriteScale;
-            int         drawHeight = frame.Height * SpriteScale;
+            int         drawWidth  = frame.Width  * scale;
+            int         drawHeight = frame.Height * scale;
             int         x          = (int)Math.Round(centerX) - drawWidth / 2;
             int         y          = (int)Math.Round(topY);
             // The artwork faces right; a left-bound chicken is mirrored in place.
@@ -753,13 +830,25 @@ namespace RottenEggs
             canvas.ClearShade();
         }
 
+        /// <summary>The boss is drawn one scale step larger than the laying chickens.</summary>
+        private static int ChickenDrawScale(GameModel.Chicken chicken)
+        {
+            return chicken.IsBoss ? SpriteScale + 1 : SpriteScale;
+        }
+
+        /// <summary>Distance from a chicken's top to its perch, in draw pixels.</summary>
+        private static int ChickenDrawHeight(GameModel.Chicken chicken)
+        {
+            return (int)GameModel.ChickenH * ChickenDrawScale(chicken) / SpriteScale;
+        }
+
         /// <summary>Wooden perch a chicken patrols along, drawn under its whole lane.</summary>
         private void DrawPerch(GameModel.Chicken chicken)
         {
             DrawPerch(
                 (int)Math.Round(chicken.MinX - GameModel.PerchMargin),
                 (int)Math.Round(chicken.MaxX + GameModel.PerchMargin),
-                (int)Math.Round(chicken.Y    + GameModel.ChickenH));
+                (int)Math.Round(chicken.Y    + ChickenDrawHeight(chicken)));
         }
 
         private void DrawPerch(int left, int right, int top)
@@ -805,6 +894,26 @@ namespace RottenEggs
             }
         }
 
+        /// <summary>
+        /// The boss takes eight hits, so it wears a segmented bar instead of the
+        /// four pips the laying chickens carry. The bar flips to pink when the
+        /// boss is past half health.
+        /// </summary>
+        private void DrawBossHealthBar(int hp, int maxHp, double centerX, int y)
+        {
+            const int cell = 9;
+            int width = maxHp * cell + 2;
+            int x = (int)Math.Round(centerX) - width / 2;
+            canvas.SetColor(GameModel.Dark);
+            canvas.FillRect(x, y, width, 7);
+            for (int i = 0; i < maxHp; i++)
+            {
+                Color32 lit = hp * 2 > maxHp ? GameModel.Gold : GameModel.Pink;
+                canvas.SetColor(i < hp ? lit : new Color32(78, 94, 101, 255));
+                canvas.FillRect(x + 1 + i * cell, y + 2, cell - 1, 3);
+            }
+        }
+
         private void DrawEgg(int x, int y, EggKind kind, bool thrown)
         {
             Color32 shell = GameModel.ColorFor(kind);
@@ -834,6 +943,20 @@ namespace RottenEggs
                     break;
                 case EggKind.Golden:
                     canvas.FillRect(x + 2, y + 3, 3, 3);
+                    break;
+                case EggKind.Shield:
+                    // Broad at the top, tapering to a point.
+                    canvas.FillPolygon(
+                        new[] { x + 1, x + 6, x + 6, x + 4, x + 1 },
+                        new[] { y + 2, y + 2, y + 5, y + 8, y + 5 }, 5);
+                    break;
+                case EggKind.SlowDown:
+                    // Hourglass: a bar at each end with the sand pinched in the middle.
+                    canvas.FillRect(x + 1, y + 2, 5, 1);
+                    canvas.FillRect(x + 1, y + 7, 5, 1);
+                    canvas.FillRect(x + 2, y + 3, 3, 1);
+                    canvas.FillRect(x + 3, y + 4, 1, 1);
+                    canvas.FillRect(x + 2, y + 5, 3, 1);
                     break;
                 case EggKind.Normal:
                     if (thrown)
@@ -977,13 +1100,14 @@ namespace RottenEggs
             DrawTopPanel();
 
             // ── Day 3: hearts with backing box ───────────────────────────────
-            DrawHeartsWithBox(10, 9, player.LivesHalf);
+            // Five hearts span 10..100, so the 1UP/score block sits just past.
+            DrawHeartsWithBox(10, 9, player.LivesHalf, GameModel.SingleMaxLivesHalf / 2);
 
             // ── Day 3: 1UP label above score (classic arcade style) ──────────
-            DrawShadowText("1UP",                         72,  9, GameModel.Gold, Black, FontTiny);
-            DrawShadowText("SCORE " + player.Score.ToString("D5"), 72, 22, White,  Black, FontSmall);
+            DrawShadowText("1UP",                         110,  9, GameModel.Gold, Black, FontTiny);
+            DrawShadowText("SCORE " + player.Score.ToString("D5"), 110, 22, White,  Black, FontSmall);
             DrawShadowText("COMBO " + player.Combo + "  x" + player.Multiplier(),
-                72, 30, Muted, Black, FontSmall);
+                110, 30, Muted, Black, FontSmall);
 
             // ── Day 3: FEVER blink ────────────────────────────────────────────
             if (player.InFever() && (int)(_clock * 3.0) % 2 == 0)
@@ -992,10 +1116,25 @@ namespace RottenEggs
             }
             // ─────────────────────────────────────────────────────────────────
 
-            DrawCenteredText("COOP " + model.Defeated + "/3",   240, 14, GameModel.Gold, Black, FontSmall);
+            DrawCenteredText(model.StageLabel + "  " + model.Defeated + "/" + model.StageGoal,
+                240, 14, GameModel.Gold, Black, FontSmall);
             DrawCenteredText("CHAOS LV." + model.DifficultyTier(), 240, 26, Muted, Black, FontTiny);
             DrawShadowText("EGGS " + player.Ammo.ToString("D2"),  391, 14, White, Black, FontSmall);
             DrawShadowText("SPACE TO THROW",                       372, 26, Muted, Black, FontSmall);
+
+            // Shields and the slow-down field only spawn in single player, so
+            // their readouts live here rather than on the Duo HUD.
+            if (player.ShieldCount > 0)
+            {
+                DrawShadowText("SHIELD x" + player.ShieldCount, 8, 187,
+                    GameModel.Mint, GameModel.Dark, FontTiny);
+            }
+
+            if (player.SlowDownTimer > 0)
+            {
+                DrawShadowText("EGGS SLOW " + Mathf.CeilToInt((float)player.SlowDownTimer), 8, 197,
+                    GameModel.Ice, GameModel.Dark, FontTiny);
+            }
 
             DrawEffectBar(player, 8, 202, 120, GameModel.Pink);
             if (player.StatusTimer > 0 && model.Phase == Phase.Playing)
@@ -1015,7 +1154,7 @@ namespace RottenEggs
             // ── Day 3: P1 side — 1UP label + hearts with box ─────────────────
             DrawShadowText("1UP", 7, 9, GameModel.Gold, Black, FontTiny);
             DrawShadowText("P1",  7, 20, GameModel.Cyan, Black, FontSmall);
-            DrawHeartsWithBox(28, 9, one.LivesHalf);
+            DrawHeartsWithBox(28, 9, one.LivesHalf, GameModel.DuoMaxLivesHalf / 2);
             DrawShadowText(one.Score.ToString("D4"), 87, 14, White, Black, FontSmall);
             DrawShadowText("x" + one.Multiplier(),  87, 26, Muted, Black, FontSmall);
 
@@ -1026,7 +1165,7 @@ namespace RottenEggs
             // ── Day 3: P2 side — 2UP label + hearts with box ─────────────────
             DrawShadowText(two.Score.ToString("D4"), 337, 14, White,          Black, FontSmall);
             DrawShadowText("x" + two.Multiplier(),  369, 26, Muted,          Black, FontSmall);
-            DrawHeartsWithBox(401, 9, two.LivesHalf);
+            DrawHeartsWithBox(401, 9, two.LivesHalf, GameModel.DuoMaxLivesHalf / 2);
             DrawShadowText("P2",  455, 20, GameModel.Pink, Black, FontSmall);
             DrawShadowText("2UP", 455,  9, GameModel.Gold, Black, FontTiny);
             // ─────────────────────────────────────────────────────────────────
@@ -1057,16 +1196,18 @@ namespace RottenEggs
         /// <summary>
         /// The heart group sits directly on the top panel. The Day 3 backing box
         /// was dropped once the hearts gained their own dark silhouette and
-        /// border, which give them all the contrast they need.
+        /// border, which give them all the contrast they need. Draws the mode's
+        /// full heart row: five hearts in single player, three in Duo, with
+        /// empty hearts staying visible as lives are lost.
         /// </summary>
-        private void DrawHeartsWithBox(int startX, int y, int halfUnits)
+        private void DrawHeartsWithBox(int startX, int y, int halfUnits, int maxHearts)
         {
-            DrawHearts(startX, y, halfUnits);
+            DrawHearts(startX, y, halfUnits, maxHearts);
         }
 
-        private void DrawHearts(int startX, int y, int halfUnits)
+        private void DrawHearts(int startX, int y, int halfUnits, int maxHearts)
         {
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < maxHearts; i++)
             {
                 double fill = Math.Max(0, Math.Min(1, (halfUnits - i * 2) / 2.0));
                 DrawHeart(startX + i * 18, y, fill);
@@ -1211,8 +1352,10 @@ namespace RottenEggs
             {
                 bool won = model.Phase == Phase.Won;
                 accent  = won ? GameModel.Gold  : GameModel.Pink;
-                heading = won ? "COOP CLEARED!"  : "BASKET BROKEN";
-                detail  = won ? "ALL 3 CHICKENS DEFEATED" : "SIX CRACKS USED ALL 3 HEARTS";
+                heading = won ? "ALL STAGES CLEARED!" : "BASKET BROKEN";
+                detail  = won
+                    ? "STAGE 1  •  STAGE 2  •  BOSS BEATEN"
+                    : "RAN OUT OF HEARTS ON " + model.StageLabel;
             }
             else if (model.WinnerPlayer == 0)
             {

@@ -108,6 +108,21 @@ namespace RottenEggs
 
         private void HandleMenuKeys()
         {
+            if (model.Phase != Phase.Menu)
+            {
+                if (Pressed(GameKey.R) || (Pressed(GameKey.Enter) && model.Phase != Phase.Playing))
+                {
+                    RestartRound();
+                }
+
+                if (Pressed(GameKey.Escape))
+                {
+                    ReturnToMenu();
+                }
+
+                return;
+            }
+
             if (Pressed(GameKey.Up) || Pressed(GameKey.W))
             {
                 NavigateMenu(-1);
@@ -131,16 +146,6 @@ namespace RottenEggs
             if (Pressed(GameKey.Two))
             {
                 StartMode(Mode.Duo);
-            }
-
-            if (Pressed(GameKey.R) && model.Phase != Phase.Menu)
-            {
-                RestartRound();
-            }
-
-            if (Pressed(GameKey.Escape))
-            {
-                ReturnToMenu();
             }
         }
 
@@ -179,14 +184,12 @@ namespace RottenEggs
 
         private void ConfirmSelection()
         {
-            if (model.Phase == Phase.Menu)
+            if (model.Phase != Phase.Menu)
             {
-                StartMode(menuSelection == 0 ? Mode.Single : Mode.Duo);
+                return;
             }
-            else if (model.Phase == Phase.Won || model.Phase == Phase.Lost)
-            {
-                RestartRound();
-            }
+
+            StartMode(menuSelection == 0 ? Mode.Single : Mode.Duo);
         }
 
         private void StartMode(Mode selectedMode)
@@ -196,7 +199,9 @@ namespace RottenEggs
                 return;
             }
 
-            model.StartRound(selectedMode);
+            // Single player always opens on stage 1 and chains the rest in as they
+            // are cleared; Duo has no stages.
+            model.StartRound(selectedMode, Stage.Stage1);
             audioManager.Play(AudioManager.Sfx.UiConfirm);
             audioManager.PlayMusic(AudioManager.Music.Game);
         }

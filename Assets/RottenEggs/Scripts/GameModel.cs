@@ -24,7 +24,16 @@ namespace RottenEggs
         Speed,
         Freeze,
         Reverse,
-        Golden
+        Golden,
+        Shield,        // Power-up: absorb one hit
+        SlowDown       // Power-up: slow all falling eggs
+    }
+
+    public enum Stage
+    {
+        Stage1,        // Original: 3 chickens, no respawn
+        Stage2,        // Respawn chickens when knocked down
+        BossStage      // One boss chicken with 8 HP
     }
 
     /// <summary>
@@ -89,6 +98,10 @@ namespace RottenEggs
         public const double EggW = 7;
         public const double EggH = 9;
 
+        /// <summary>Half-hearts each mode starts with. Single player gets five hearts.</summary>
+        public const int SingleMaxLivesHalf = 10;
+        public const int DuoMaxLivesHalf = 6;
+
         /// <summary>Chicken artwork is drawn from its top-left, with the feet 40px down.</summary>
         public const double ChickenH = 40;
 
@@ -107,6 +120,7 @@ namespace RottenEggs
         public static readonly Color32 Cream = new Color32(255, 244, 216, 255);
         public static readonly Color32 Cyan = new Color32(67, 198, 219, 255);
         public static readonly Color32 Ice = new Color32(158, 232, 255, 255);
+        public static readonly Color32 Mint = new Color32(112, 232, 176, 255);
         public static readonly Color32 Purple = new Color32(171, 113, 255, 255);
         public static readonly Color32 Gold = new Color32(255, 222, 89, 255);
         public static readonly Color32 Pink = new Color32(232, 45, 119, 255);
@@ -141,6 +155,8 @@ namespace RottenEggs
             public double FireCooldown;
             public double StatusTimer;
             public string StatusText = "";
+            public int ShieldCount;       // Number of shield power-ups
+            public double SlowDownTimer;  // Slow-down power-up active timer
 
             public PlayerState(int index)
             {
@@ -188,6 +204,9 @@ namespace RottenEggs
             public readonly double Y;
             public readonly double SpeedScale;
             public readonly int StartDirection;
+            public readonly bool CanRespawn;         // Stage 2: respawn after death
+            public readonly double RespawnTime;      // Seconds until respawn
+            public readonly bool IsBoss;            // Boss stage: bigger HP/speed
             public double CenterX;
             public int Direction;
             public int Hp = 4;
@@ -203,6 +222,9 @@ namespace RottenEggs
             /// <summary>Seconds left standing still, which is what puts the idle clip up.</summary>
             public double StandTime;
 
+            /// <summary>For respawn: counts down until chicken reappears</summary>
+            public double RespawnTimer;
+
             public Chicken(
                 int owner,
                 int lane,
@@ -212,6 +234,37 @@ namespace RottenEggs
                 double maxX,
                 double speedScale,
                 int direction)
+                : this(owner, lane, centerX, y, minX, maxX, speedScale, direction, false, 0.0, false)
+            {
+            }
+
+            public Chicken(
+                int owner,
+                int lane,
+                double centerX,
+                double y,
+                double minX,
+                double maxX,
+                double speedScale,
+                int direction,
+                bool canRespawn,
+                double respawnTime)
+                : this(owner, lane, centerX, y, minX, maxX, speedScale, direction, canRespawn, respawnTime, false)
+            {
+            }
+
+            public Chicken(
+                int owner,
+                int lane,
+                double centerX,
+                double y,
+                double minX,
+                double maxX,
+                double speedScale,
+                int direction,
+                bool canRespawn,
+                double respawnTime,
+                bool isBoss)
             {
                 Owner = owner;
                 Lane = lane;
@@ -224,6 +277,13 @@ namespace RottenEggs
                 StartDirection = direction;
                 Direction = direction;
                 Facing = direction;
+                CanRespawn = canRespawn;
+                RespawnTime = respawnTime;
+                IsBoss = isBoss;
+                if (isBoss)
+                {
+                    Hp = 8;  // Boss has 8 HP
+                }
             }
 
             public bool Alive()
@@ -231,9 +291,16 @@ namespace RottenEggs
                 return Hp > 0;
             }
 
+            public bool IsRespawning()
+            {
+                return !Alive() && CanRespawn && RespawnTimer > 0;
+            }
+
             public Rect Bounds()
             {
-                return new Rect((float)(CenterX - 18), (float)(Y + 4), 36f, 36f);
+                // The boss is drawn at a larger scale, so its hit box grows with it.
+                double size = IsBoss ? 54 : 36;
+                return new Rect((float)(CenterX - size / 2), (float)(Y + 4), (float)size, (float)size);
             }
 
             /// <summary>Starts a clip that runs once, optionally rooting the chicken.</summary>
@@ -256,6 +323,19 @@ namespace RottenEggs
                     Anim = state;
                     AnimTime = 0;
                 }
+            }
+
+            /// <summary>Reset chicken to alive state for respawn</summary>
+            public void Respawn()
+            {
+                Hp = IsBoss ? 8 : 4;
+                CenterX = StartX;
+                Direction = StartDirection;
+                Facing = StartDirection;
+                Anim = AnimState.Walking;
+                AnimTime = 0;
+                StandTime = 0;
+                ActionTime = 0;
             }
         }
 
@@ -356,14 +436,80 @@ namespace RottenEggs
         public readonly List<GameEvent> Events = new List<GameEvent>();
         public readonly double[] SpawnTimers = new double[2];
 
+        /// <summary>Single-player run length, shown on the menu option.</summary>
+        public const int StageCount = 3;
+
+        public static int StageIndex(Stage stage)
+        {
+            switch (stage)
+            {
+                case Stage.Stage2:
+                    return 2;
+                case Stage.BossStage:
+                    return 3;
+                default:
+                    return 1;
+            }
+        }
+
+        /// <summary>Row title the HUD and result screens show for a stage.</summary>
+        public static string StageTitle(Stage stage)
+        {
+            switch (stage)
+            {
+                case Stage.Stage2:
+                    return "STAGE 2  RESPAWN";
+                case Stage.BossStage:
+                    return "BOSS STAGE";
+                default:
+                    return "STAGE 1  CLASSIC";
+            }
+        }
+
         public Phase Phase = Phase.Menu;
         public Mode Mode = Mode.Single;
+        public Stage CurrentStage = Stage.Stage1;
+        public int StageLevel = 1;        // 1, 2, or 3 (boss)
         public int Defeated;
         public int WinnerPlayer;
         public double Elapsed;
         public double LastPowerSpawnP0;   // per-player for fair duo distribution
         public double LastPowerSpawnP1;
         public double ShakeTime;
+
+        /// <summary>
+        /// Set the moment a stage goal is reached and spent at the end of Update,
+        /// so a stage swap never rewrites the egg or shot lists mid-iteration.
+        /// </summary>
+        private bool stageAdvancePending;
+
+        public int StageNumber
+        {
+            get { return StageIndex(CurrentStage); }
+        }
+
+        /// <summary>Knockdowns needed to clear the stage that is running now.</summary>
+        public int StageGoal
+        {
+            get
+            {
+                switch (CurrentStage)
+                {
+                    case Stage.Stage2:
+                        return 6;
+                    case Stage.BossStage:
+                        return 1;
+                    default:
+                        return 3;
+                }
+            }
+        }
+
+        /// <summary>Short stage name for the HUD and the result screen.</summary>
+        public string StageLabel
+        {
+            get { return CurrentStage == Stage.BossStage ? "BOSS" : "STAGE " + StageNumber; }
+        }
 
         public GameModel() : this(new System.Random())
         {
@@ -383,11 +529,19 @@ namespace RottenEggs
 
         public void StartRound(Mode selectedMode)
         {
+            StartRound(selectedMode, CurrentStage);
+        }
+
+        public void StartRound(Mode selectedMode, Stage stage)
+        {
+            CurrentStage = stage;
+            StageLevel = StageIndex(stage);
+            stageAdvancePending = false;
             ResetRoundData(selectedMode);
             Phase = Phase.Playing;
             if (Mode == Mode.Single)
             {
-                SetStatus(Players[0], "CATCH. AIM AHEAD. THROW.", 1.8);
+                SetStatus(Players[0], StageLabel + "  •  CATCH. AIM AHEAD. THROW.", 2.0);
             }
             else
             {
@@ -398,13 +552,63 @@ namespace RottenEggs
 
         public void RestartCurrentMode()
         {
-            StartRound(Mode);
+            StartRound(Mode, CurrentStage);
         }
 
         public void ReturnToMenu()
         {
+            CurrentStage = Stage.Stage1;
+            StageLevel = 1;
+            stageAdvancePending = false;
             ResetRoundData(Mode.Single);
             Phase = Phase.Menu;
+        }
+
+        /// <summary>
+        /// Swaps in the next single-player stage once the current one is cleared.
+        /// Hearts, score, ammo and shields carry over, so a clear reads as progress
+        /// rather than a fresh start. Called from Update so a stage swap never
+        /// rewrites the egg or shot lists while they are being iterated.
+        /// </summary>
+        private void ApplyStageAdvance()
+        {
+            PlayerState player = Players[0];
+            int lives = player.LivesHalf;
+            int ammo = player.Ammo;
+            int score = player.Score;
+            int combo = player.Combo;
+            int shields = player.ShieldCount;
+
+            Stage next;
+            string banner;
+            switch (CurrentStage)
+            {
+                case Stage.Stage1:
+                    next = Stage.Stage2;
+                    banner = StageTitle(next) + "!";
+                    break;
+                case Stage.Stage2:
+                    next = Stage.BossStage;
+                    banner = StageTitle(next) + "!";
+                    break;
+                default:
+                    Phase = Phase.Won;
+                    WinnerPlayer = 1;
+                    SetStatus(player, "ALL STAGES CLEARED!", 2.0);
+                    Emit(EventType.Win, 0);
+                    return;
+            }
+
+            CurrentStage = next;
+            StageLevel = StageIndex(next);
+            ResetRoundData(Mode.Single);
+            player.LivesHalf = lives;
+            player.Ammo = ammo;
+            player.Score = score;
+            player.Combo = combo;
+            player.ShieldCount = shields;
+            SetStatus(player, banner, 2.0);
+            Emit(EventType.Power, 0);
         }
 
         private void ResetRoundData(Mode selectedMode)
@@ -413,9 +617,27 @@ namespace RottenEggs
             Chickens.Clear();
             if (Mode == Mode.Single)
             {
-                Chickens.Add(new Chicken(0, 0, 98, 48, 48, 140, 0.86, 1));
-                Chickens.Add(new Chicken(0, 1, 240, 42, 194, 286, 1.05, -1));
-                Chickens.Add(new Chicken(0, 2, 382, 48, 340, 432, 0.94, 1));
+                // Stage-based chicken setup
+                if (CurrentStage == Stage.Stage1)
+                {
+                    // Stage 1: Original - 3 normal chickens, no respawn
+                    Chickens.Add(new Chicken(0, 0, 98, 48, 48, 140, 0.86, 1));
+                    Chickens.Add(new Chicken(0, 1, 240, 42, 194, 286, 1.05, -1));
+                    Chickens.Add(new Chicken(0, 2, 382, 48, 340, 432, 0.94, 1));
+                }
+                else if (CurrentStage == Stage.Stage2)
+                {
+                    // Stage 2: the same three lanes, but a downed chicken climbs
+                    // back onto its perch after five seconds until the goal is met.
+                    Chickens.Add(new Chicken(0, 0, 98, 48, 48, 140, 0.86, 1, true, 5.0));
+                    Chickens.Add(new Chicken(0, 1, 240, 42, 194, 286, 1.05, -1, true, 5.0));
+                    Chickens.Add(new Chicken(0, 2, 382, 48, 340, 432, 0.94, 1, true, 5.0));
+                }
+                else // BossStage
+                {
+                    // Boss Stage: one oversized boss, eight hits, slow heavy patrol.
+                    Chickens.Add(new Chicken(0, 0, 240, 64, 120, 340, 0.55, 1, false, 0.0, true));
+                }
             }
             else
             {
@@ -431,8 +653,8 @@ namespace RottenEggs
             CrackedEggs.Clear();
             Events.Clear();
 
-            ResetPlayer(Players[0]);
-            ResetPlayer(Players[1]);
+            ResetPlayer(Players[0], selectedMode);
+            ResetPlayer(Players[1], selectedMode);
             if (Mode == Mode.Single)
             {
                 Players[0].ArenaMinX = 4;
@@ -464,9 +686,10 @@ namespace RottenEggs
             ShakeTime = 0;
         }
 
-        private static void ResetPlayer(PlayerState player)
+        private static void ResetPlayer(PlayerState player, Mode selectedMode)
         {
-            player.LivesHalf = 6;
+            // Single player runs on five hearts; Duo keeps its classic three.
+            player.LivesHalf = selectedMode == Mode.Single ? SingleMaxLivesHalf : DuoMaxLivesHalf;
             player.Ammo = 0;
             player.Score = 0;
             player.Combo = 0;
@@ -477,6 +700,8 @@ namespace RottenEggs
             player.FireCooldown = 0;
             player.StatusTimer = 0;
             player.StatusText = "";
+            player.ShieldCount = 0;
+            player.SlowDownTimer = 0;
         }
 
         public void Update(double rawDt, int playerOneAxis, int playerTwoAxis)
@@ -517,6 +742,14 @@ namespace RottenEggs
             if (Phase == Phase.Playing && Mode == Mode.Single)
             {
                 UpdateShots(dt);
+            }
+
+            // A cleared stage is swapped in here, once every list walk is done. A
+            // terminal tick (the last heart lost on the same frame) keeps its result.
+            if (stageAdvancePending && Phase == Phase.Playing && Mode == Mode.Single)
+            {
+                stageAdvancePending = false;
+                ApplyStageAdvance();
             }
         }
 
@@ -580,6 +813,21 @@ namespace RottenEggs
                 chicken.ActionTime = Math.Max(0, chicken.ActionTime - dt);
                 if (!chicken.Alive())
                 {
+                    // Stage 2: a downed chicken counts itself back in, then climbs
+                    // back onto its perch at full health.
+                    if (chicken.IsRespawning())
+                    {
+                        chicken.RespawnTimer -= dt;
+                        if (chicken.RespawnTimer <= 0)
+                        {
+                            chicken.RespawnTimer = 0;
+                            chicken.Respawn();
+                            SetStatus(Players[0], "CHICKEN RESPAWNED!", 1.0);
+                            SpawnParticles(chicken.CenterX, chicken.Y + 15, Cyan, 12, 90);
+                            Emit(EventType.ChickenDown, 0);
+                        }
+                    }
+
                     // A defeated chicken keeps the death clip's last frame for good.
                     continue;
                 }
@@ -637,11 +885,37 @@ namespace RottenEggs
         private void UpdateSingleSpawning(double dt)
         {
             SpawnTimers[0] -= dt;
-            if (SpawnTimers[0] <= 0 && Defeated < Chickens.Count)
+            if (SpawnTimers[0] > 0)
             {
-                SpawnSingleEgg();
-                SpawnTimers[0] = SpawnInterval() * (0.88 + Random.NextDouble() * 0.25);
+                return;
             }
+
+            if (!AnyChickenAlive())
+            {
+                // Stage 2: hold the beat until a downed chicken is back on its perch.
+                SpawnTimers[0] = 0.4;
+                return;
+            }
+
+            SpawnSingleEgg();
+            SpawnTimers[0] = SpawnInterval() * (0.88 + Random.NextDouble() * 0.25);
+        }
+
+        /// <summary>
+        /// True while at least one chicken is on its perch. Stage 2 can have every
+        /// chicken down at once, so the spawner asks rather than counting.
+        /// </summary>
+        private bool AnyChickenAlive()
+        {
+            foreach (Chicken chicken in Chickens)
+            {
+                if (chicken.Alive())
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void UpdateDuoSpawning(double dt)
@@ -680,7 +954,23 @@ namespace RottenEggs
                 && !PowerEggVisible(0)
                 && Random.NextDouble() < 0.12)
             {
-                kind = EggKind.Speed;
+                double roll = Random.NextDouble();
+                if (roll < 0.40)
+                {
+                    kind = EggKind.Speed;
+                }
+                else if (roll < 0.70)
+                {
+                    kind = EggKind.Shield;
+                }
+                else if (roll < 0.90)
+                {
+                    kind = EggKind.SlowDown;
+                }
+                else
+                {
+                    kind = EggKind.Golden;
+                }
                 LastPowerSpawnP0 = Elapsed;
             }
 
@@ -761,7 +1051,29 @@ namespace RottenEggs
         public double BaseFallSpeed()
         {
             int tier = Math.Min(5, (int)(Elapsed / 20.0));
-            return (Mode == Mode.Single ? 52 : 50) + tier * (Mode == Mode.Single ? 8 : 7);
+            return ((Mode == Mode.Single ? 52 : 50) + tier * (Mode == Mode.Single ? 8 : 7)) * StagePace();
+        }
+
+        /// <summary>
+        /// Later stages lay eggs a little faster and drop them a little harder.
+        /// Duo play keeps the original pace, since both players share one screen.
+        /// </summary>
+        private double StagePace()
+        {
+            if (Mode != Mode.Single)
+            {
+                return 1.0;
+            }
+
+            switch (CurrentStage)
+            {
+                case Stage.Stage2:
+                    return 1.10;
+                case Stage.BossStage:
+                    return 1.20;
+                default:
+                    return 1.0;
+            }
         }
 
         public double FallSpeedFor(FallingEgg egg)
@@ -772,6 +1084,13 @@ namespace RottenEggs
                 speed *= 1.65;
             }
 
+            // Slow-down power-up
+            PlayerState owner = Players[egg.Owner];
+            if (owner.SlowDownTimer > 0)
+            {
+                speed *= 0.5;  // Slow eggs by 50%
+            }
+
             return speed;
         }
 
@@ -780,7 +1099,7 @@ namespace RottenEggs
             int tier = Math.Min(5, (int)(Elapsed / 20.0));
             if (Mode == Mode.Single)
             {
-                return Math.Max(0.86, 1.55 - tier * 0.13);
+                return Math.Max(0.86, 1.55 - tier * 0.13) / StagePace();
             }
 
             return Math.Max(0.82, 1.42 - tier * 0.11);
@@ -899,6 +1218,26 @@ namespace RottenEggs
                     Emit(EventType.Power, catcher.Index);
                     break;
                 }
+
+                case EggKind.Shield:
+                {
+                    catcher.ShieldCount = Math.Min(catcher.ShieldCount + 1, 3);
+                    points = AddComboScore(catcher, 25);
+                    SetStatus(catcher, "SHIELD!  +" + points, 1.0);
+                    SpawnParticles(egg.X, egg.Y, Cyan, 12, 85);
+                    Emit(EventType.Power, catcher.Index);
+                    break;
+                }
+
+                case EggKind.SlowDown:
+                {
+                    catcher.SlowDownTimer = 5.0;
+                    points = AddComboScore(catcher, 35);
+                    SetStatus(catcher, "SLOW DOWN!  +" + points, 1.0);
+                    SpawnParticles(egg.X, egg.Y, Ice, 14, 90);
+                    Emit(EventType.Power, catcher.Index);
+                    break;
+                }
             }
         }
 
@@ -910,6 +1249,16 @@ namespace RottenEggs
             if (egg.Kind != EggKind.Normal)
             {
                 SetStatus(target, "POWER MISSED - SAFE", 0.8);
+                return;
+            }
+
+            // Shield absorbs one hit
+            if (target.ShieldCount > 0)
+            {
+                target.ShieldCount--;
+                SetStatus(target, "SHIELD BLOCKED!", 1.0);
+                SpawnParticles(target.BasketX + GameModel.BasketW / 2, GameModel.BasketY, Cyan, 16, 100);
+                Emit(EventType.Power, target.Index);
                 return;
             }
 
@@ -1026,12 +1375,18 @@ namespace RottenEggs
                 Defeated++;
                 player.Score += 200;
                 SpawnParticles(chicken.CenterX, chicken.Y + 15, Pink, 18, 110);
-                if (Defeated == Chickens.Count)
+                if (chicken.CanRespawn)
                 {
-                    Phase = Phase.Won;
-                    WinnerPlayer = 1;
-                    SetStatus(player, "COOP CLEARED!", 2.0);
-                    Emit(EventType.Win, 0);
+                    chicken.RespawnTimer = chicken.RespawnTime;
+                }
+
+                if (Mode == Mode.Single && Defeated >= StageGoal)
+                {
+                    // Goal met: Update swaps the next stage in once every list
+                    // walk for this tick has finished.
+                    stageAdvancePending = true;
+                    SetStatus(player, "STAGE CLEAR!", 1.2);
+                    Emit(EventType.ChickenDown, 0);
                 }
                 else
                 {
@@ -1154,6 +1509,10 @@ namespace RottenEggs
                     return Purple;
                 case EggKind.Golden:
                     return Gold;
+                case EggKind.Shield:
+                    return Mint;
+                case EggKind.SlowDown:
+                    return Ice;
                 default:
                     return Cream;
             }
@@ -1166,7 +1525,7 @@ namespace RottenEggs
 
         public void ConfigurePreview(Mode previewMode)
         {
-            StartRound(previewMode);
+            StartRound(previewMode, Stage.Stage1);
             Elapsed = 26;
             SpawnTimers[0] = 99;
             SpawnTimers[1] = 99;
@@ -1174,7 +1533,7 @@ namespace RottenEggs
             {
                 PlayerState player = Players[0];
                 player.BasketX = 218;
-                player.LivesHalf = 5;
+                player.LivesHalf = 7;
                 player.Ammo = 4;
                 player.Score = 1840;
                 player.Combo = 8;
