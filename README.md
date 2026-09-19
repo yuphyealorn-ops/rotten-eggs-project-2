@@ -57,6 +57,17 @@ you miss.
 | Single | `A`/`D` to move · `Space` to throw · `R` restart · `Esc` back to menu |
 | Duo | Player 1 `A`/`D` · Player 2 `←`/`→` · `R` restart · `Esc` back to menu |
 | Audio | `M` mute · `-`/`+` volume |
+| Pause | `P` pause/resume · `W`/`S` or `↑`/`↓` select · `Enter` confirm · `Esc` resume |
+
+**Controller (player 1)** — Left stick or D-pad moves and selects menu items.
+South (`A` / Cross) confirms; east (`B` / Circle) throws during play, resumes
+from pause, and returns to the menu from results. Start pauses/resumes, west
+(`X` / Square) restarts, Select/View/Share toggles mute, and the left/right
+bumpers lower/raise volume. The pause menu offers Resume, Restart, Main Menu,
+and Quit Game; the main menu also offers Quit Game. Quitting stops Play mode
+in the Unity Editor and closes the standalone game. Player 2 keeps the arrow
+keys in Duo. Controller hints appear only after actual controller input—not
+just connecting one.
 
 ## Running it
 
