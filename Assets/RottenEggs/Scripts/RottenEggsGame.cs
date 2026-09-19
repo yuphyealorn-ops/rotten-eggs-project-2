@@ -27,6 +27,9 @@ namespace RottenEggs
         [SerializeField]
         private bool runSelfTestOnStart = false;
 
+        /// <summary>How far the left stick must tilt before it counts as a move.</summary>
+        private const float GamepadDeadZone = 0.4f;
+
         private GameModel model;
         private AudioManager audioManager;
         private ChickenSprites sprites;
@@ -84,7 +87,9 @@ namespace RottenEggs
             HandleMenuKeys();
             HandleAudioKeys();
 
-            int p1Axis = (Held(GameKey.D) ? 1 : 0) - (Held(GameKey.A) ? 1 : 0);
+            // A controller drives player one alongside the keys; player two
+            // stays on the arrow keys for now.
+            int p1Axis = ClampAxis((Held(GameKey.D) ? 1 : 0) - (Held(GameKey.A) ? 1 : 0) + GamepadAxis());
             int p2Axis = (Held(GameKey.Right) ? 1 : 0) - (Held(GameKey.Left) ? 1 : 0);
             if (model.Mode == Mode.Single)
             {
@@ -92,7 +97,7 @@ namespace RottenEggs
                 p2Axis = 0;
             }
 
-            if (Pressed(GameKey.Space))
+            if (Pressed(GameKey.Space) || GamepadFirePressed())
             {
                 model.Fire(0);
             }
@@ -414,7 +419,54 @@ namespace RottenEggs
 
             return keyboard[Mapped(key)].wasPressedThisFrame;
         }
+
+        /// <summary>
+        /// Left stick as a digital axis for player one: -1, 0 or 1, so a pad
+        /// moves the basket exactly like the keys do. The dead zone stops a
+        /// resting stick from creeping.
+        /// </summary>
+        private static int GamepadAxis()
+        {
+            Gamepad pad = Gamepad.current;
+            if (pad == null)
+            {
+                return 0;
+            }
+
+            float x = pad.leftStick.ReadValue().x;
+            if (x > GamepadDeadZone)
+            {
+                return 1;
+            }
+
+            if (x < -GamepadDeadZone)
+            {
+                return -1;
+            }
+
+            return 0;
+        }
+
+        /// <summary>The east face button — B on an Xbox pad, Circle on PlayStation.</summary>
+        private static bool GamepadFirePressed()
+        {
+            Gamepad pad = Gamepad.current;
+            return pad != null && pad.buttonEast.wasPressedThisFrame;
+        }
 #else
+        // The legacy input manager's joystick mapping differs per platform, and
+        // this project runs on the Input System package, so the pad is only
+        // wired up on that side.
+        private static int GamepadAxis()
+        {
+            return 0;
+        }
+
+        private static bool GamepadFirePressed()
+        {
+            return false;
+        }
+
         private static KeyCode Mapped(GameKey key)
         {
             switch (key)
