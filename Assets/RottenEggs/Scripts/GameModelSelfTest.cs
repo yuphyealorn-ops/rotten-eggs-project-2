@@ -63,9 +63,33 @@ namespace RottenEggs
             model.Player(0).Ammo = 1;
 
             model.Player(0).FireCooldown = 0;
+            double throwStartX = model.Player(0).BasketX;
             model.Fire(0);
-            Require(model.Player(0).Ammo == 0 && model.Shots.Count == 1,
-                "single throw must consume exactly one ammo");
+            Require(model.Player(0).Ammo == 0
+                    && model.Player(0).PendingThrow
+                    && model.Player(0).ThrowTime == 0
+                    && Math.Abs(model.Player(0).FireCooldown - 0.22) < 1e-9
+                    && model.Shots.Count == 0,
+                "single throw must consume one ammo and wait for frame three before releasing a shot");
+            checks++;
+
+            model.Update(0.024, 0, 0);
+            Require(model.Player(0).PendingThrow && model.Shots.Count == 0,
+                "throw animation must not release before frame three");
+            checks++;
+
+            model.Update(0.026, 0, 0);
+            Require(!model.Player(0).PendingThrow
+                    && model.Player(0).ThrowTime > 0
+                    && model.Shots.Count == 1
+                    && Math.Abs(model.Shots[0].X - (throwStartX + GameModel.BasketW / 2 - GameModel.EggW / 2)) < 1e-9
+                    && Math.Abs(model.Shots[0].Y - (GameModel.BasketRimY - GameModel.EggH)) < 1e-9,
+                "throw animation must release one shot on frame three from the basket rim");
+            checks++;
+
+            model.Update(0.05, 0, 0);
+            Require(model.Shots.Count == 1 && model.Player(0).ThrowTime == -1,
+                "completed throw animation must end without releasing duplicate shots");
             checks++;
 
             model.Shots.Clear();
@@ -271,17 +295,134 @@ namespace RottenEggs
                 "a slow-down egg must last five seconds and halve the falling eggs' speed");
             checks++;
 
+            GameModel spriteRules = new GameModel(new Random(67));
+            spriteRules.StartRound(Mode.Single);
+            spriteRules.SpawnTimers[0] = 999;
+            Require(GameModel.EggW == 14 && GameModel.EggH == 18,
+                "egg sprites must use the 14x18 animation frame size");
+            Require(GameModel.BasketY == 209
+                    && GameModel.BasketH == 15
+                    && GameModel.BasketSpriteY == 199
+                    && GameModel.BasketRimY == 203,
+                "new basket sprite anchors must preserve the old gameplay basket anchor");
+            UnityEngine.Rect basketBounds = spriteRules.Player(0).BasketBounds();
+            Require(Math.Abs(basketBounds.y - GameModel.BasketRimY) < 1e-6
+                    && Math.Abs(basketBounds.height - (225 - GameModel.BasketRimY)) < 1e-6,
+                "basket collision bounds must run from the rim to the fixed bottom");
+            checks += 3;
+
+            Require(spriteRules.Player(0).CatchTime == -1
+                    && spriteRules.Player(0).ThrowTime == -1
+                    && !spriteRules.Player(0).PendingThrow,
+                "player animation state must start idle after a round reset");
+            checks++;
+
+            spriteRules.Player(0).Ammo = 2;
+            spriteRules.Player(0).FireCooldown = 0;
+            spriteRules.Fire(0);
+            spriteRules.Player(0).BasketX += 20;
+            spriteRules.Update(0.05, 0, 0);
+            Require(spriteRules.Player(0).Ammo == 1
+                    && spriteRules.Shots.Count == 1
+                    && Math.Abs(spriteRules.Shots[0].X - (spriteRules.Player(0).BasketX + GameModel.BasketW / 2 - GameModel.EggW / 2)) < 1e-9,
+                "delayed throw release must use the current basket center and consume ammo only once");
+            checks++;
+            int shotCountAfterRelease = spriteRules.Shots.Count;
+            spriteRules.Update(0.05, 0, 0);
+            Require(spriteRules.Shots.Count == shotCountAfterRelease,
+                "released throw must not duplicate on later animation frames");
+            checks++;
+
+            GameModel.Shot oldShot = new GameModel.Shot(spriteRules.Player(0).BasketX, 100);
+            spriteRules.Shots.Clear();
+            spriteRules.Shots.Add(oldShot);
+            spriteRules.Player(0).Ammo = 1;
+            spriteRules.Player(0).FireCooldown = 0;
+            spriteRules.Fire(0);
+            double oldShotY = oldShot.Y;
+            spriteRules.Update(0.05, 0, 0);
+            Require(spriteRules.Shots.Count == 2 && oldShot.Y < oldShotY,
+                "throw release must happen after existing shots advance for the tick");
+            checks++;
+
+            spriteRules.Player(0).Ammo = 1;
+            spriteRules.Player(0).FireCooldown = 0;
+            spriteRules.Fire(0);
+            PlaceCatch(spriteRules, 0, EggKind.Normal);
+            spriteRules.Update(0, 0, 0);
+            Require(spriteRules.Player(0).PendingThrow
+                    && spriteRules.Player(0).CatchTime == 0,
+                "catch animation must not cancel a pending throw animation");
+            checks++;
+
+            GameModel catchProbe = new GameModel(new Random(71));
+            catchProbe.StartRound(Mode.Single);
+            catchProbe.SpawnTimers[0] = 999;
+            PlaceCatch(catchProbe, 0, EggKind.Shield);
+            double caughtCenter = catchProbe.FallingEggs[0].X + GameModel.EggW / 2;
+            catchProbe.Update(0, 0, 0);
+            Require(catchProbe.Player(0).CatchTime == 0
+                    && Math.Abs(catchProbe.Player(0).CatchX - caughtCenter) < 1e-9,
+                "single-player power catches must record catch animation time and egg center");
+            checks++;
+
+            GameModel duoCatchProbe = new GameModel(new Random(73));
+            duoCatchProbe.StartRound(Mode.Duo);
+            duoCatchProbe.SpawnTimers[0] = 999;
+            duoCatchProbe.SpawnTimers[1] = 999;
+            PlaceCatch(duoCatchProbe, 1, EggKind.Speed);
+            caughtCenter = duoCatchProbe.FallingEggs[0].X + GameModel.EggW / 2;
+            duoCatchProbe.Update(0, 0, 0);
+            Require(duoCatchProbe.Player(1).CatchTime == 0
+                    && Math.Abs(duoCatchProbe.Player(1).CatchX - caughtCenter) < 1e-9,
+                "duo catches must record catch animation state for the catching player");
+            checks++;
+
+            GameModel ageProbe = new GameModel(new Random(79));
+            ageProbe.StartRound(Mode.Single);
+            ageProbe.SpawnTimers[0] = 999;
+            ageProbe.FallingEggs.Add(new GameModel.FallingEgg(EggKind.Normal, 0, 0, 30, 30));
+            ageProbe.Shots.Add(new GameModel.Shot(30, 120));
+            ageProbe.Update(0.05, 0, 0);
+            Require(Math.Abs(ageProbe.FallingEggs[0].Age - 0.05) < 1e-9
+                    && Math.Abs(ageProbe.Shots[0].Age - 0.05) < 1e-9,
+                "falling eggs and thrown shots must age by the simulation delta");
+            checks++;
+
+            GameModel landingProbe = new GameModel(new Random(83));
+            landingProbe.StartRound(Mode.Single);
+            landingProbe.SpawnTimers[0] = 999;
+            landingProbe.FallingEggs.Add(new GameModel.FallingEgg(
+                EggKind.Normal,
+                0,
+                0,
+                42,
+                GameModel.GroundY - GameModel.EggH));
+            landingProbe.Update(0, 0, 0);
+            Require(landingProbe.FallingEggs.Count == 0
+                    && landingProbe.CrackedEggs.Count == 1
+                    && Math.Abs(landingProbe.CrackedEggs[0].Y - (GameModel.GroundY - GameModel.EggH)) < 1e-9,
+                "eggs must miss when their 14x18 rect touches the ground and crack on that same rect");
+            checks++;
+
             GameModel loss = new GameModel(new Random(11));
             loss.StartRound(Mode.Single);
             loss.SpawnTimers[0] = 999;
+            loss.Player(0).CatchTime = 0;
+            loss.Player(0).ThrowTime = 0;
+            loss.Player(0).PendingThrow = true;
             for (int i = 0; i < GameModel.SingleMaxLivesHalf; i++)
             {
                 PlaceMiss(loss, 0, EggKind.Normal, 10 + i * 12);
             }
 
             loss.Update(0, 0, 0);
-            Require(loss.Phase == Phase.Lost && loss.Player(0).LivesHalf == 0,
-                "ten single-player misses must end the round");
+            Require(loss.Phase == Phase.Lost
+                    && loss.Player(0).LivesHalf == 0
+                    && loss.Player(0).CatchTime == -1
+                    && loss.Player(0).ThrowTime == -1
+                    && !loss.Player(0).PendingThrow,
+                "ten single-player misses must end the round and clear animation state");
             checks++;
 
             model.StartRound(Mode.Duo);
@@ -426,19 +567,32 @@ namespace RottenEggs
                 "long-running Duo patrols must stay inside their owner's arena");
             checks++;
 
+            model.Player(0).CatchTime = 0;
+            model.Player(0).ThrowTime = 0;
+            model.Player(0).PendingThrow = true;
             model.RestartCurrentMode();
             Require(model.Mode == Mode.Duo
                     && model.Phase == Phase.Playing
                     && model.Player(0).LivesHalf == GameModel.DuoMaxLivesHalf
                     && model.Player(1).LivesHalf == GameModel.DuoMaxLivesHalf
+                    && model.Player(0).CatchTime == -1
+                    && model.Player(0).ThrowTime == -1
+                    && !model.Player(0).PendingThrow
                     && model.FallingEggs.Count == 0
                     && model.Chickens.All(chicken =>
                         chicken.CenterX == chicken.StartX && chicken.Direction == chicken.StartDirection),
-                "Duo restart must preserve the mode and fully reset both players");
+                "Duo restart must preserve the mode and fully reset both players and animation state");
             checks++;
 
+            model.Player(0).CatchTime = 0;
+            model.Player(0).ThrowTime = 0;
+            model.Player(0).PendingThrow = true;
             model.ReturnToMenu();
-            Require(model.Phase == Phase.Menu, "Escape flow must return the model to the menu");
+            Require(model.Phase == Phase.Menu
+                    && model.Player(0).CatchTime == -1
+                    && model.Player(0).ThrowTime == -1
+                    && !model.Player(0).PendingThrow,
+                "Escape flow must return the model to the menu and clear animation state");
             checks++;
 
             return "SELF-TEST PASSED: " + checks + " gameplay checks";
@@ -452,12 +606,12 @@ namespace RottenEggs
                 owner,
                 0,
                 player.BasketX + 10,
-                GameModel.BasketY - GameModel.EggH + 1));
+                GameModel.BasketRimY - GameModel.EggH + 1));
         }
 
         private static void PlaceMiss(GameModel model, int owner, EggKind kind, double x)
         {
-            model.FallingEggs.Add(new GameModel.FallingEgg(kind, owner, 0, x, GameModel.GroundY + 8));
+            model.FallingEggs.Add(new GameModel.FallingEgg(kind, owner, 0, x, GameModel.GroundY - GameModel.EggH));
         }
 
         private static void Require(bool condition, string message)

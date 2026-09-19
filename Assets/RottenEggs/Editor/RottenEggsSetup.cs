@@ -35,6 +35,7 @@ namespace RottenEggs.EditorTools
             Debug.Log(GameModelSelfTest.Run());
             Debug.Log(AudioManager.VerifyBundledAssets());
             Debug.Log(ChickenSprites.VerifyBundledAssets());
+            Debug.Log(EggSprites.VerifyBundledAssets());
         }
     }
 }
