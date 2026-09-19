@@ -33,13 +33,10 @@ namespace RottenEggs
         private static readonly Color32 Wood       = new Color32(150,  92,  52, 255);
         private static readonly Color32 WoodLight  = new Color32(196, 129,  74, 255);
         private static readonly Color32 WoodDark   = new Color32(102,  58,  36, 255);
-        private static readonly Color32 Basket     = new Color32(144,  82,  48, 255);
-        private static readonly Color32 BasketLight = new Color32(207, 132,  74, 255);
         private static readonly Color32 Panel      = new Color32(24,   37,  48, 226);
         private static readonly Color32 White      = new Color32(255, 250, 240, 255);
         private static readonly Color32 Muted      = new Color32(182, 218, 226, 255);
         private static readonly Color32 Black      = new Color32(0,     0,   0, 255);
-        private static readonly Color32 Yolk       = new Color32(249, 197,  58, 255);
 
         /// <summary>The chicken frames are 20 x 21, drawn at whole-number scale like the rest.</summary>
         private const int SpriteScale = 2;
@@ -63,6 +60,7 @@ namespace RottenEggs
 
         private readonly PixelCanvas canvas;
         private readonly ChickenSprites sprites;
+        private readonly EggSprites eggs;
 
         /// <summary>
         /// Painted backdrop, already scaled to the canvas. Null falls back to the
@@ -81,12 +79,15 @@ namespace RottenEggs
         /// needs timed animation without touching game rules.
         /// </summary>
         private double _clock;
+        private bool controllerHints;
+        private static readonly string[] PauseOptions = { "RESUME", "RESTART", "MAIN MENU", "QUIT GAME" };
 
-        public GameRenderer(PixelCanvas canvas, ChickenSprites sprites,
+        public GameRenderer(PixelCanvas canvas, ChickenSprites sprites, EggSprites eggs,
                             SpriteFrame backdrop = null, HeartSprites hearts = null)
         {
             this.canvas   = canvas;
             this.sprites  = sprites;
+            this.eggs     = eggs;
             this.backdrop = backdrop;
             this.hearts   = hearts;
         }
@@ -96,9 +97,11 @@ namespace RottenEggs
         // ══════════════════════════════════════════════════════════════════════
 
         /// <summary>Paints one complete frame of the game.</summary>
-        public void Render(GameModel model, AudioManager audio, double menuClock, int menuSelection)
+        public void Render(GameModel model, AudioManager audio, double menuClock, int menuSelection,
+                           bool controllerHints = false, bool paused = false, int pauseSelection = 0)
         {
             _clock = menuClock;   // store for all sub-drawers
+            this.controllerHints = controllerHints;
 
             canvas.ResetTranslate();
             canvas.ClearClip();
@@ -144,6 +147,7 @@ namespace RottenEggs
             {
                 DrawResultOverlay(model);
             }
+            if (paused) DrawPauseOverlay(audio, pauseSelection);
 
             // CRT scanline pass — always last so it sits over every layer.
             DrawScanlines();
@@ -309,7 +313,7 @@ namespace RottenEggs
                 {
                     double progress = (t - launch) / VignetteEggAir;
                     int eggY = (int)Math.Round(GameModel.WorldH + (chickenMidY - GameModel.WorldH) * progress);
-                    DrawEgg(centerX - (int)GameModel.EggW / 2, eggY, EggKind.Normal, true);
+                    DrawEgg(centerX - (int)GameModel.EggW / 2, eggY, EggKind.Normal, true, t - launch);
                 }
             }
         }
@@ -349,21 +353,22 @@ namespace RottenEggs
             // even 23px above and below.
             DrawCenteredText("ROTTEN EGGS", 240, 82, White, Black, FontLarge);
 
-            // Menu options (original positions preserved)
-            DrawMenuOption(92, 105, 296, 43, 0, menuSelection,
+            DrawMenuOption(92, 99, 296, 31, 0, menuSelection,
                 "1  SINGLE PLAYER", "CATCH • THROW • CLEAR ALL " + GameModel.StageCount + " STAGES");
-            DrawMenuOption(92, 154, 296, 43, 1, menuSelection,
-                "2  DUO PLAYER", "P1 A/D • P2 ARROWS • POWER-EGG SABOTAGE");
+            DrawMenuOption(92, 134, 296, 31, 1, menuSelection,
+                "2  DUO PLAYER", controllerHints ? "P1 STICK • P2 ARROWS • SABOTAGE" : "P1 A/D • P2 ARROWS • POWER-EGG SABOTAGE");
+            DrawMenuOption(92, 169, 296, 31, 2, menuSelection,
+                "QUIT GAME", "CLOSE ROTTEN EGGS");
 
             // Navigation hint (original position)
-            DrawCenteredText("↑/↓ OR W/S SELECT  •  ENTER START",
+            DrawCenteredText(controllerHints ? "STICK/D-PAD SELECT  •  SOUTH CONFIRM" : "↑/↓ OR W/S SELECT  •  ENTER CONFIRM",
                 240, 210, Muted, Black, FontTiny);
 
             // Audio status
             string audioText = audio.IsMuted()
                 ? "AUDIO MUTED"
                 : "AUDIO " + Mathf.RoundToInt(audio.GetVolume() * 100) + "%";
-            DrawCenteredText("M MUTE  •  -/+ VOLUME  •  " + audioText, 240, 220,
+            DrawCenteredText((controllerHints ? "SELECT MUTE • LB/RB VOLUME • " : "M MUTE • -/+ VOLUME • ") + audioText, 240, 220,
                 audio.IsMuted() ? GameModel.Pink : GameModel.Gold, Black, FontTiny);
 
             // Developer credit on the open ground below the panel — a slim dark
@@ -416,9 +421,9 @@ namespace RottenEggs
             }
             // ─────────────────────────────────────────────────────────────────
 
-            DrawCenteredText(title,  x + width / 2, y + 20,
+            DrawCenteredText(title,  x + width / 2, y + 18,
                 selected ? White : Muted, Black, FontOption);
-            DrawCenteredText(detail, x + width / 2, y + 36,
+            DrawCenteredText(detail, x + width / 2, y + 27,
                 selected ? accent : new Color32(133, 165, 174, 255), Black, FontTiny);
         }
 
@@ -467,17 +472,14 @@ namespace RottenEggs
 
             foreach (GameModel.Shot shot in model.Shots)
             {
-                canvas.SetColor(255, 255, 255, 120);
-                canvas.FillRect((int)shot.X + 2, (int)shot.Y + 8, 3, 6);
-                DrawEgg((int)shot.X, (int)shot.Y, EggKind.Normal, true);
+                DrawEgg((int)shot.X, (int)shot.Y, EggKind.Normal, true, shot.Age);
             }
 
             GameModel.PlayerState player = model.Player(0);
-            DrawBasket((int)player.BasketX, (int)GameModel.BasketY,
-                GameModel.Pink, player.Ammo, player.SpeedTime > 0);
+            DrawBasket(player, GameModel.Pink, player.Ammo);
             if (player.InFever())
             {
-                DrawFeverAura(model.Elapsed, (int)player.BasketX, (int)GameModel.BasketY, GameModel.Pink);
+                DrawFeverAura(model.Elapsed, (int)player.BasketX, (int)GameModel.BasketRimY, GameModel.Pink);
             }
         }
 
@@ -505,18 +507,16 @@ namespace RottenEggs
 
             GameModel.PlayerState one = model.Player(0);
             GameModel.PlayerState two = model.Player(1);
-            DrawBasket((int)one.BasketX, (int)GameModel.BasketY,
-                GameModel.Cyan, 0, one.SpeedTime > 0);
-            DrawBasket((int)two.BasketX, (int)GameModel.BasketY,
-                GameModel.Pink, 0, two.SpeedTime > 0);
+            DrawBasket(one, GameModel.Cyan, 0);
+            DrawBasket(two, GameModel.Pink, 0);
             if (one.InFever())
             {
-                DrawFeverAura(model.Elapsed, (int)one.BasketX, (int)GameModel.BasketY, GameModel.Cyan);
+                DrawFeverAura(model.Elapsed, (int)one.BasketX, (int)GameModel.BasketRimY, GameModel.Cyan);
             }
 
             if (two.InFever())
             {
-                DrawFeverAura(model.Elapsed, (int)two.BasketX, (int)GameModel.BasketY, GameModel.Pink);
+                DrawFeverAura(model.Elapsed, (int)two.BasketX, (int)GameModel.BasketRimY, GameModel.Pink);
             }
         }
 
@@ -528,252 +528,16 @@ namespace RottenEggs
             }
         }
 
-        // ── Day 4: per-egg falling detail ─────────────────────────────────────
-
-        /// <summary>
-        /// Day 4: renders one falling egg with layered visual detail.
-        /// Power eggs get vibrant per-type animations (no text labels).
-        /// Normal eggs get a shadow, trail, and crack-warning near the ground.
-        /// </summary>
         private void DrawFallingEgg(GameModel.FallingEgg egg)
         {
             int x = (int)Math.Round(egg.X);
             int y = (int)Math.Round(egg.Y);
-
-            // 1 ── Drop shadow on the ground that grows as the egg falls.
-            double distToGround = GameModel.GroundY - y;
-            double shadowT = Math.Max(0.0, Math.Min(1.0, 1.0 - distToGround / 180.0));
-            if (shadowT > 0.05)
-            {
-                int sw = 2 + (int)(12 * shadowT);
-                int sh = 1 + (int)(3  * shadowT);
-                int sx = x + 3 - sw / 2;
-                int sy = (int)GameModel.GroundY - sh - 1;
-                canvas.SetColor(0, 0, 0, (byte)(50 * shadowT));
-                canvas.FillOval(sx, sy, sw, sh);
-            }
-
-            // 2 ── Motion trail: faded ghost 4 px above the egg.
-            if (y > 20)
-            {
-                canvas.SetColor(GameModel.ColorFor(egg.Kind), 55);
-                canvas.FillOval(x, y - 4, 7, 9);
-            }
-
-            // 3 ── Per-type ambient effect BEHIND the egg body.
-            DrawPowerEggAmbient(x, y, egg.Kind);
-
-            // 4 ── Egg body (power eggs drawn larger).
-            if (egg.Kind == EggKind.Normal)
-            {
-                DrawEgg(x, y, egg.Kind, false);
-            }
-            else
-            {
-                DrawPowerEgg(x, y, egg.Kind);
-            }
-
-            // 5 ── Per-type detail AROUND the egg (sparkles, streaks, crystals).
-            DrawPowerEggDetail(x, y, egg.Kind);
-
-            // 6 ── Crack lines on normal eggs close to the ground.
-            bool nearGround = y > GameModel.GroundY - 42;
-            if (nearGround && egg.Kind == EggKind.Normal)
-            {
-                canvas.SetColor(GameModel.Dark);
-                canvas.FillRect(x + 3, y + 6, 1, 3);
-                canvas.FillRect(x + 2, y + 7, 1, 2);
-                canvas.FillRect(x + 4, y + 7, 1, 2);
-                canvas.FillRect(x + 1, y + 5, 1, 1);
-                canvas.FillRect(x + 5, y + 4, 1, 1);
-            }
-        }
-
-        /// <summary>
-        /// Day 4: large pulsing aura drawn BEFORE the egg body so the egg
-        /// appears to float inside a glowing halo. Normal eggs get nothing.
-        /// </summary>
-        private void DrawPowerEggAmbient(int x, int y, EggKind kind)
-        {
-            if (kind == EggKind.Normal) return;
-
-            Color32 auraColor = GameModel.ColorFor(kind);
-            double  pulse     = (Math.Sin(_clock * 5.0) + 1.0) / 2.0;
-            byte    alpha     = (byte)(80 + (int)(85 * pulse));
-            canvas.SetColor(auraColor, alpha);
-            canvas.FillOval(x - 4, y - 3, 15, 15);  // halo ring behind egg
-        }
-
-        /// <summary>
-        /// Day 4: per-type vibrant effect drawn AROUND the egg — no text labels.
-        ///
-        ///   Speed   → animated cyan horizontal speed-streak lines (rushing air)
-        ///   Freeze  → white ice-crystal stars at all 4 corners
-        ///   Reverse → purple arrow wings on both sides pointing outward
-        ///   Golden  → four twinkling gold sparkle crosses that alternate with clock
-        /// </summary>
-        private void DrawPowerEggDetail(int x, int y, EggKind kind)
-        {
-            switch (kind)
-            {
-                case EggKind.Speed:
-                {
-                    // Three horizontal streak lines that shift leftward with _clock,
-                    // giving a "rushing through air" feel on both sides of the egg.
-                    int shift = (int)(_clock * 10.0) % 5;
-                    canvas.SetColor(GameModel.Cyan, 210);
-                    // Left streaks
-                    canvas.FillRect(x - 8 + shift, y + 2, 4, 1);
-                    canvas.FillRect(x - 9 + shift, y + 5, 5, 1);
-                    canvas.FillRect(x - 8 + shift, y + 7, 3, 1);
-                    // Right streaks (mirror)
-                    canvas.FillRect(x + 11 - shift, y + 2, 4, 1);
-                    canvas.FillRect(x + 11 - shift, y + 5, 5, 1);
-                    canvas.FillRect(x + 11 - shift, y + 7, 3, 1);
-                    break;
-                }
-
-                case EggKind.Freeze:
-                {
-                    // Four ice-crystal + shapes at the egg corners.
-                    // Each crystal is a tiny 3-pixel cross in bright ice-white.
-                    canvas.SetColor(new Color32(210, 245, 255, 220));
-                    // Top-left
-                    canvas.FillRect(x - 5, y,     3, 1);
-                    canvas.FillRect(x - 4, y - 1, 1, 3);
-                    // Top-right
-                    canvas.FillRect(x + 9, y,     3, 1);
-                    canvas.FillRect(x + 10, y - 1, 1, 3);
-                    // Bottom-left
-                    canvas.FillRect(x - 5, y + 8, 3, 1);
-                    canvas.FillRect(x - 4, y + 7, 1, 3);
-                    // Bottom-right
-                    canvas.FillRect(x + 9, y + 8, 3, 1);
-                    canvas.FillRect(x + 10, y + 7, 1, 3);
-                    break;
-                }
-
-                case EggKind.Reverse:
-                {
-                    // Arrow "wings" on each side pointing outward — left ← and right →
-                    canvas.SetColor(GameModel.Purple, 220);
-                    // Left arrow (←)
-                    canvas.FillRect(x - 8, y + 4, 5, 1);   // shaft
-                    canvas.FillRect(x - 8, y + 3, 1, 3);   // arrowhead
-                    // Right arrow (→)
-                    canvas.FillRect(x + 10, y + 4, 5, 1);  // shaft
-                    canvas.FillRect(x + 14, y + 3, 1, 3);  // arrowhead
-                    break;
-                }
-
-                case EggKind.Golden:
-                {
-                    // Four sparkle cross-shapes (+) at cardinal positions.
-                    // Each one blinks independently on its own clock offset
-                    // so they twinkle rather than all flash at once.
-                    int[] sx = { x + 3, x - 5, x + 9, x + 3 };
-                    int[] sy = { y - 6, y + 4, y + 4, y + 13 };
-                    for (int i = 0; i < 4; i++)
-                    {
-                        if ((int)(_clock * 4.0 + i) % 2 == 0)
-                        {
-                            canvas.SetColor(GameModel.Gold, 240);
-                            canvas.FillRect(sx[i],     sy[i] - 1, 1, 3); // vertical
-                            canvas.FillRect(sx[i] - 1, sy[i],     3, 1); // horizontal
-                        }
-                    }
-                    break;
-                }
-
-                case EggKind.Shield:
-                {
-                    // Mint brackets around the egg that slowly breathe outward.
-                    int grow = (int)((Math.Sin(_clock * 4.0) + 1.0) * 0.5 * 2.0);
-                    canvas.SetColor(GameModel.Mint, 220);
-                    canvas.FillRect(x - 6,          y - 2,          5,            1);
-                    canvas.FillRect(x - 6,          y - 2,          1,            4 + grow);
-                    canvas.FillRect(x + 10,         y - 2,          5,            1);
-                    canvas.FillRect(x + 14,         y - 2,          1,            4 + grow);
-                    canvas.FillRect(x - 6,          y + 10,         5,            1);
-                    canvas.FillRect(x - 6,          y + 10 - grow,  1,            4 + grow);
-                    canvas.FillRect(x + 10,         y + 10,         5,            1);
-                    canvas.FillRect(x + 14,         y + 10 - grow,  1,            4 + grow);
-                    break;
-                }
-
-                case EggKind.SlowDown:
-                {
-                    // Ice flecks that drift upward, as if the egg is holding time back.
-                    int drift = (int)(_clock * 4.0) % 6;
-                    canvas.SetColor(GameModel.Ice, 205);
-                    canvas.FillRect(x - 6, y + 8 - drift, 2, 2);
-                    canvas.FillRect(x + 13, y + 6 - drift, 2, 2);
-                    canvas.FillRect(x + 2, y - 4 - drift / 2, 2, 2);
-                    canvas.FillRect(x + 9, y + 13 - drift, 2, 2);
-                    break;
-                }
-            }
-        }
-
-        /// <summary>
-        /// Day 4: power egg drawn with a larger oval (9×11 shell, 11×13 border)
-        /// and bigger White symbols — size alone makes them distinct from normal.
-        /// </summary>
-        private void DrawPowerEgg(int x, int y, EggKind kind)
-        {
-            Color32 shell = GameModel.ColorFor(kind);
-
-            canvas.SetColor(GameModel.Dark);
-            canvas.FillOval(x - 2, y - 1, 11, 13);
-            canvas.SetColor(shell);
-            canvas.FillOval(x - 1, y, 9, 11);
-            canvas.SetColor(White);
-            canvas.FillRect(x + 2, y + 1, 3, 3);
-
-            canvas.SetColor(White);
-            switch (kind)
-            {
-                case EggKind.Speed:
-                    canvas.FillPolygon(
-                        new[] { x + 5, x + 2, x + 5, x + 4, x + 7 },
-                        new[] { y + 2, y + 6, y + 6, y + 9, y + 5 }, 5);
-                    break;
-                case EggKind.Freeze:
-                    canvas.FillRect(x + 4, y + 2, 1, 7);
-                    canvas.FillRect(x + 1, y + 5, 7, 1);
-                    canvas.FillRect(x + 2, y + 3, 1, 1);
-                    canvas.FillRect(x + 6, y + 3, 1, 1);
-                    canvas.FillRect(x + 2, y + 7, 1, 1);
-                    canvas.FillRect(x + 6, y + 7, 1, 1);
-                    break;
-                case EggKind.Reverse:
-                    canvas.FillRect(x + 1, y + 5, 7, 1);
-                    canvas.FillRect(x + 1, y + 4, 1, 3);
-                    canvas.FillRect(x + 7, y + 4, 1, 3);
-                    break;
-                case EggKind.Golden:
-                    canvas.FillRect(x + 3, y + 3, 3, 5);
-                    canvas.FillRect(x + 1, y + 5, 7, 1);
-                    canvas.FillRect(x + 2, y + 4, 1, 1);
-                    canvas.FillRect(x + 6, y + 4, 1, 1);
-                    canvas.FillRect(x + 2, y + 6, 1, 1);
-                    canvas.FillRect(x + 6, y + 6, 1, 1);
-                    break;
-                case EggKind.Shield:
-                    canvas.FillRect(x + 2, y + 2, 5, 1);
-                    canvas.FillRect(x + 2, y + 3, 5, 4);
-                    canvas.FillRect(x + 3, y + 7, 3, 1);
-                    canvas.FillRect(x + 4, y + 8, 1, 1);
-                    break;
-                case EggKind.SlowDown:
-                    canvas.FillRect(x + 2, y + 2, 5, 1);
-                    canvas.FillRect(x + 2, y + 8, 5, 1);
-                    canvas.FillRect(x + 3, y + 3, 3, 1);
-                    canvas.FillRect(x + 4, y + 4, 1, 2);
-                    canvas.FillRect(x + 3, y + 6, 3, 1);
-                    canvas.FillRect(x + 4, y + 7, 1, 1);
-                    break;
-            }
+            double shadowT = Math.Max(0, Math.Min(1, 1 - (GameModel.GroundY - y) / 180.0));
+            int sw = 2 + (int)(12 * shadowT);
+            int sh = 1 + (int)(3 * shadowT);
+            canvas.SetColor(0, 0, 0, (byte)(50 * shadowT));
+            canvas.FillOval(x + (int)GameModel.EggW / 2 - sw / 2, (int)GameModel.GroundY - sh - 1, sw, sh);
+            DrawEgg(x, y, egg.Kind, false, egg.Age);
         }
 
         // ══════════════════════════════════════════════════════════════════════
@@ -914,104 +678,47 @@ namespace RottenEggs
             }
         }
 
-        private void DrawEgg(int x, int y, EggKind kind, bool thrown)
+        private void DrawEgg(int x, int y, EggKind kind, bool thrown, double age = 0)
         {
-            Color32 shell = GameModel.ColorFor(kind);
-            canvas.SetColor(GameModel.Dark);
-            canvas.FillOval(x - 1, y - 1, 9, 11);
-            canvas.SetColor(shell);
-            canvas.FillOval(x, y, 7, 9);
-            canvas.SetColor(White);
-            canvas.FillRect(x + 2, y + 1, 2, 2);
-
-            canvas.SetColor(GameModel.Dark);
-            switch (kind)
-            {
-                case EggKind.Speed:
-                    canvas.FillPolygon(
-                        new[] { x + 4, x + 2, x + 4, x + 3, x + 6 },
-                        new[] { y + 1, y + 5, y + 5, y + 8, y + 4 }, 5);
-                    break;
-                case EggKind.Freeze:
-                    canvas.FillRect(x + 3, y + 2, 1, 5);
-                    canvas.FillRect(x + 1, y + 4, 5, 1);
-                    break;
-                case EggKind.Reverse:
-                    canvas.FillRect(x + 1, y + 3, 4, 1);
-                    canvas.FillRect(x + 1, y + 3, 1, 3);
-                    canvas.FillRect(x + 4, y + 5, 2, 1);
-                    break;
-                case EggKind.Golden:
-                    canvas.FillRect(x + 2, y + 3, 3, 3);
-                    break;
-                case EggKind.Shield:
-                    // Broad at the top, tapering to a point.
-                    canvas.FillPolygon(
-                        new[] { x + 1, x + 6, x + 6, x + 4, x + 1 },
-                        new[] { y + 2, y + 2, y + 5, y + 8, y + 5 }, 5);
-                    break;
-                case EggKind.SlowDown:
-                    // Hourglass: a bar at each end with the sand pinched in the middle.
-                    canvas.FillRect(x + 1, y + 2, 5, 1);
-                    canvas.FillRect(x + 1, y + 7, 5, 1);
-                    canvas.FillRect(x + 2, y + 3, 3, 1);
-                    canvas.FillRect(x + 3, y + 4, 1, 1);
-                    canvas.FillRect(x + 2, y + 5, 3, 1);
-                    break;
-                case EggKind.Normal:
-                    if (thrown)
-                    {
-                        canvas.SetColor(GameModel.Pink);
-                        canvas.FillRect(x + 2, y + 5, 3, 2);
-                    }
-
-                    break;
-            }
+            SpriteFrame frame = thrown ? eggs.Thrown.FrameAt(age, true) : eggs.Falling(kind).FrameAt(age, true);
+            canvas.DrawSprite(frame, x, y, x + (int)GameModel.EggW, y + (int)GameModel.EggH);
         }
 
-        private void DrawBasket(int x, int y, Color32 accent, int ammo, bool boosted)
+        private void DrawBasket(GameModel.PlayerState player, Color32 accent, int ammo)
         {
-            // The basket body takes the scene's light; the eggs stacked in it
-            // are gameplay information and stay at full brightness below.
-            canvas.SetShade(SunsetShadeR, SunsetShadeG, SunsetShadeB);
-            if (boosted)
+            int x = (int)player.BasketX;
+            int y = (int)GameModel.BasketSpriteY;
+            int rimY = (int)GameModel.BasketRimY;
+            if (player.SpeedTime > 0)
             {
                 canvas.SetColor(accent, 130);
                 for (int i = 0; i < 4; i++)
-                {
-                    canvas.FillRect(x - 7 - i * 6, y + 5 + (i % 2) * 3, 5, 2);
-                }
+                    canvas.FillRect(x - 7 - i * 6, rimY + 5 + (i % 2) * 3, 5, 2);
             }
 
-            canvas.SetColor(accent);
-            canvas.FillRect(x - 3, y, 54, 3);
-            canvas.SetColor(GameModel.Dark);
-            canvas.FillPolygon(new[] { x - 2, x + 50, x + 44, x + 4 },
-                new[] { y + 2, y + 2, y + 17, y + 17 }, 4);
-            canvas.SetColor(Basket);
-            canvas.FillPolygon(new[] { x, x + 48, x + 42, x + 6 },
-                new[] { y + 3, y + 3, y + 15, y + 15 }, 4);
-            canvas.SetColor(BasketLight);
-            canvas.FillRect(x + 3, y + 6, 42, 3);
-            canvas.FillRect(x + 5, y + 11, 38, 2);
-            canvas.SetColor(GameModel.Dark);
-            for (int i = 0; i < 5; i++)
-            {
-                canvas.FillRect(x + 7 + i * 8, y + 4, 2, 11);
-            }
+            // Fill the four front slots first, but paint the back row underneath.
+            int backCount = Math.Min(3, Math.Max(0, ammo - 4));
+            for (int i = 0; i < backCount; i++)
+                DrawEgg(x + 6 + i * 11, rimY - 12, EggKind.Normal, false);
+            for (int i = 0; i < Math.Min(4, ammo); i++)
+                DrawEgg(x + 1 + i * 11, rimY - 7, EggKind.Normal, false);
 
-            canvas.DrawArc(x + 10, y - 10, 28, 22, 180, -180, 2);
+            SpriteFrame basket = eggs.BasketIdle;
+            if (player.ThrowTime >= 0)
+                basket = eggs.BasketThrow.FrameAt(player.ThrowTime, false);
+            else if (player.CatchTime >= 0)
+                basket = eggs.BasketCatch.FrameAt(player.CatchTime, false);
+            canvas.SetShade(SunsetShadeR, SunsetShadeG, SunsetShadeB);
+            canvas.DrawSprite(basket, x, y, x + 48, y + 26);
             canvas.ClearShade();
 
-            int visibleAmmo = Math.Min(5, ammo);
-            for (int i = 0; i < visibleAmmo; i++)
+            if (ammo > 7)
+                DrawShadowText("+" + (ammo - 7), x + 39, rimY - 17, White, GameModel.Dark, FontTiny);
+            if (player.CatchTime >= 0 && player.CatchTime < eggs.CatchPuff.Duration)
             {
-                DrawEgg(x + 7 + i * 8, y - 1 - (i % 2) * 2, EggKind.Normal, false);
-            }
-
-            if (ammo > 5)
-            {
-                DrawShadowText("+" + (ammo - 5), x + 39, y - 5, White, GameModel.Dark, FontTiny);
+                int puffX = (int)Math.Round(player.CatchX) - 8;
+                canvas.DrawSprite(eggs.CatchPuff.FrameAt(player.CatchTime, false),
+                    puffX, rimY - 3, puffX + 16, rimY + 2);
             }
         }
 
@@ -1022,7 +729,7 @@ namespace RottenEggs
             int left   = x - inset;
             int right  = x + (int)GameModel.BasketW + inset;
             int top    = y - inset;
-            int bottom = y + (int)GameModel.BasketH + inset;
+            int bottom = (int)(GameModel.BasketY + GameModel.BasketH) + inset;
 
             canvas.SetColor(GameModel.Gold, 190);
             canvas.FillRect(left,  top,    right - left, 2);
@@ -1055,39 +762,15 @@ namespace RottenEggs
             }
         }
 
-        /// <summary>
-        /// Paints a broken egg: two shell halves around a yolk that spilt out,
-        /// fading as the shell ages. Reads as a crack at a glance, unlike the
-        /// particle burst it replaces.
-        /// </summary>
+        /// <summary>Play the crack once on the egg's original rect, then hold and fade.</summary>
         private void DrawCrackedEgg(GameModel.CrackedEgg egg)
         {
-            int alpha = (int)(255 * Math.Max(0, egg.Life / egg.MaxLife));
-            byte a = (byte)Mathf.Clamp(alpha, 0, 255);
+            Color32 tint = GameModel.ColorFor(egg.Kind);
+            tint.a = (byte)Mathf.Clamp((int)(255 * Math.Max(0, egg.Life / egg.MaxLife)), 0, 255);
             int x = (int)Math.Round(egg.X);
             int y = (int)Math.Round(egg.Y);
-            Color32 shell = GameModel.ColorFor(egg.Kind);
-
-            // Shadow cast on the ground.
-            canvas.SetColor(GameModel.Dark, a);
-            canvas.FillOval(x, y, 8, 4);
-
-            // Spilt yolk between the shell halves.
-            canvas.SetColor(Yolk, a);
-            canvas.FillOval(x, y + 1, 6, 4);
-
-            // Left shell half.
-            canvas.SetColor(shell, a);
-            canvas.FillOval(x - 2, y, 4, 4);
-            // Right shell half.
-            canvas.FillOval(x + 3, y, 4, 4);
-
-            // Zig-zag crack seam across the broken edge of each half.
-            canvas.SetColor(GameModel.Dark, a);
-            canvas.FillRect(x - 2, y + 1, 2, 1);
-            canvas.FillRect(x - 3, y + 3, 2, 1);
-            canvas.FillRect(x + 5, y + 1, 2, 1);
-            canvas.FillRect(x + 6, y + 3, 2, 1);
+            canvas.DrawSprite(eggs.Crack.FrameAt(egg.MaxLife - egg.Life, false),
+                x, y, x + (int)GameModel.EggW, y + (int)GameModel.EggH, tint);
         }
 
         // ══════════════════════════════════════════════════════════════════════
@@ -1142,7 +825,7 @@ namespace RottenEggs
                 DrawCenteredText(player.StatusText, 240, 197, White, GameModel.Dark, FontSmall);
             }
 
-            DrawFooter("A/D OR ARROWS MOVE  •  SPACE THROW  •  ESC MENU  •  M AUDIO");
+            DrawFooter(controllerHints ? "STICK/D-PAD MOVE • EAST THROW • START PAUSE" : "A/D OR ARROWS MOVE • SPACE THROW • P PAUSE • ESC MENU");
         }
 
         private void DrawDuoHud(GameModel model)
@@ -1182,7 +865,7 @@ namespace RottenEggs
 
             DrawEffectLabel(one, 120, 207, GameModel.Cyan);
             DrawEffectLabel(two, 360, 207, GameModel.Pink);
-            DrawFooter("P1  A / D     •     P2  ← / →     •     ESC MENU     •     M AUDIO");
+            DrawFooter(controllerHints ? "P1 STICK/D-PAD • P2 ARROWS • START PAUSE" : "P1 A/D • P2 ARROWS • P PAUSE • ESC MENU");
         }
 
         private void DrawTopPanel()
@@ -1411,8 +1094,32 @@ namespace RottenEggs
             }
 
             DrawCenteredText(detail,                       240, 158, Muted,  Black, FontTiny);
-            DrawCenteredText("ENTER REMATCH  •  ESC MENU", 240, 187, White,  Black, FontSmall);
-            DrawCenteredText("R ALSO RESTARTS",            240, 201, Muted,  Black, FontTiny);
+            DrawCenteredText(controllerHints ? "SOUTH REMATCH • EAST MENU" : "ENTER REMATCH • ESC MENU", 240, 187, White, Black, FontSmall);
+            DrawCenteredText(controllerHints ? "WEST ALSO RESTARTS" : "R ALSO RESTARTS", 240, 201, Muted, Black, FontTiny);
+        }
+
+        private void DrawPauseOverlay(AudioManager audio, int selection)
+        {
+            canvas.SetColor(0, 0, 0, 150);
+            canvas.FillRect(0, 0, GameModel.WorldW, GameModel.WorldH);
+            canvas.SetColor(15, 29, 39, 245);
+            canvas.FillRect(80, 48, 320, 184);
+            DrawCenteredText("PAUSED", 240, 76, White, Black, FontLarge);
+            for (int i = 0; i < PauseOptions.Length; i++)
+            {
+                int y = 88 + i * 24;
+                bool selected = i == selection;
+                canvas.SetColor(selected ? GameModel.Cyan : Muted, selected ? (byte)70 : (byte)18);
+                canvas.FillRect(104, y, 272, 21);
+                DrawCenteredText((selected ? "> " : "") + PauseOptions[i], 240, y + 16,
+                    selected ? White : Muted, Black, FontSmall);
+            }
+            DrawCenteredText(controllerHints ? "D-PAD SELECT • SOUTH CONFIRM • EAST RESUME" : "UP/DOWN SELECT • ENTER CONFIRM • P RESUME",
+                240, 200, Muted, Black, FontTiny);
+            DrawCenteredText(controllerHints ? "WEST RESTART • SELECT MUTE • LB/RB VOLUME" : "R RESTART • M MUTE • -/+ VOLUME",
+                240, 212, Muted, Black, FontTiny);
+            DrawCenteredText(audio.IsMuted() ? "AUDIO MUTED" : "AUDIO " + Mathf.RoundToInt(audio.GetVolume() * 100) + "%",
+                240, 224, GameModel.Gold, Black, FontTiny);
         }
 
         // ══════════════════════════════════════════════════════════════════════

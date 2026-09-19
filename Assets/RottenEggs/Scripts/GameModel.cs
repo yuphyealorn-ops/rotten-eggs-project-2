@@ -95,8 +95,14 @@ namespace RottenEggs
         public const double BasketY = 209;
         public const double BasketW = 48;
         public const double BasketH = 15;
-        public const double EggW = 7;
-        public const double EggH = 9;
+        public const double EggW = 14;
+        public const double EggH = 18;
+        // Keep the original basket bottom fixed while aligning catches to the new rim.
+        public const double BasketSpriteY = BasketY + BasketH - 25;
+        public const double BasketRimY = BasketSpriteY + 4;
+        public const double BasketFrameSeconds = 0.025;
+        public const double BasketAnimSeconds = 4 * BasketFrameSeconds;
+        public const double ThrowReleaseSeconds = 2 * BasketFrameSeconds;
 
         /// <summary>Half-hearts each mode starts with. Single player gets five hearts.</summary>
         public const int SingleMaxLivesHalf = 10;
@@ -153,6 +159,10 @@ namespace RottenEggs
             public double ReverseTime;
             public double SabotageTime;
             public double FireCooldown;
+            public double CatchTime = -1;
+            public double CatchX;
+            public double ThrowTime = -1;
+            public bool PendingThrow;
             public double StatusTimer;
             public string StatusText = "";
             public int ShieldCount;       // Number of shield power-ups
@@ -165,7 +175,7 @@ namespace RottenEggs
 
             public Rect BasketBounds()
             {
-                return new Rect((float)BasketX, (float)BasketY, (float)BasketW, (float)BasketH);
+                return new Rect((float)BasketX, (float)BasketRimY, (float)BasketW, 22);
             }
 
             public int Multiplier()
@@ -346,6 +356,7 @@ namespace RottenEggs
             public readonly int SourceLane;
             public double X;
             public double Y;
+            public double Age;
 
             public FallingEgg(EggKind kind, int owner, int sourceLane, double x, double y)
             {
@@ -389,6 +400,7 @@ namespace RottenEggs
         {
             public double X;
             public double Y;
+            public double Age;
 
             public Shot(double x, double y)
             {
@@ -698,6 +710,10 @@ namespace RottenEggs
             player.ReverseTime = 0;
             player.SabotageTime = 0;
             player.FireCooldown = 0;
+            player.CatchTime = -1;
+            player.CatchX = 0;
+            player.ThrowTime = -1;
+            player.PendingThrow = false;
             player.StatusTimer = 0;
             player.StatusText = "";
             player.ShieldCount = 0;
@@ -713,10 +729,17 @@ namespace RottenEggs
             foreach (PlayerState player in Players)
             {
                 player.StatusTimer = Math.Max(0, player.StatusTimer - dt);
+                if (player.CatchTime >= 0)
+                {
+                    player.CatchTime += dt;
+                    if (player.CatchTime >= BasketAnimSeconds) player.CatchTime = -1;
+                }
+                if (player.ThrowTime >= 0) player.ThrowTime += dt;
             }
 
             if (Phase != Phase.Playing)
             {
+                CancelBasketAnimations();
                 return;
             }
 
@@ -744,6 +767,11 @@ namespace RottenEggs
                 UpdateShots(dt);
             }
 
+            if (Phase == Phase.Playing)
+                UpdateThrows();
+            else
+                CancelBasketAnimations();
+
             // A cleared stage is swapped in here, once every list walk is done. A
             // terminal tick (the last heart lost on the same frame) keeps its result.
             if (stageAdvancePending && Phase == Phase.Playing && Mode == Mode.Single)
@@ -761,17 +789,39 @@ namespace RottenEggs
             }
 
             PlayerState player = Players[0];
-            if (player.Ammo <= 0 || player.FireCooldown > 0)
+            if (player.Ammo <= 0 || player.FireCooldown > 0 || player.PendingThrow)
             {
                 return;
             }
 
             player.Ammo--;
             player.FireCooldown = 0.22;
-            Shots.Add(new Shot(player.BasketX + BasketW / 2 - EggW / 2, BasketY - EggH));
-            SpawnParticles(player.BasketX + BasketW / 2, BasketY, Cream, 4, 42);
-            SetStatus(player, "THROW!", 0.45);
-            Emit(EventType.Throw, 0);
+            player.ThrowTime = 0;
+            player.PendingThrow = true;
+        }
+
+        private void UpdateThrows()
+        {
+            PlayerState player = Players[0];
+            if (Mode == Mode.Single && player.PendingThrow && player.ThrowTime >= ThrowReleaseSeconds)
+            {
+                player.PendingThrow = false;
+                Shots.Add(new Shot(player.BasketX + BasketW / 2 - EggW / 2, BasketRimY - EggH));
+                SpawnParticles(player.BasketX + BasketW / 2, BasketRimY, Cream, 4, 42);
+                SetStatus(player, "THROW!", 0.45);
+                Emit(EventType.Throw, 0);
+            }
+            if (player.ThrowTime >= BasketAnimSeconds) player.ThrowTime = -1;
+        }
+
+        private void CancelBasketAnimations()
+        {
+            foreach (PlayerState player in Players)
+            {
+                player.CatchTime = -1;
+                player.PendingThrow = false;
+                player.ThrowTime = -1;
+            }
         }
 
         private void UpdateEffectTimers(double dt)
@@ -1118,6 +1168,7 @@ namespace RottenEggs
             while (index < FallingEggs.Count)
             {
                 FallingEgg egg = FallingEggs[index];
+                egg.Age += dt;
                 egg.Y += FallSpeedFor(egg) * dt;
                 PlayerState target = Players[egg.Owner];
 
@@ -1126,7 +1177,7 @@ namespace RottenEggs
                     CatchEgg(egg, target);
                     FallingEggs.RemoveAt(index);
                 }
-                else if (egg.Y > GroundY + 4)
+                else if (egg.Y + EggH >= GroundY)
                 {
                     MissEgg(egg, target);
                     FallingEggs.RemoveAt(index);
@@ -1155,6 +1206,8 @@ namespace RottenEggs
 
         private void CatchEgg(FallingEgg egg, PlayerState catcher)
         {
+            catcher.CatchTime = 0;
+            catcher.CatchX = egg.X + EggW / 2;
             int points;
             switch (egg.Kind)
             {
@@ -1321,6 +1374,7 @@ namespace RottenEggs
             while (index < Shots.Count)
             {
                 Shot shot = Shots[index];
+                shot.Age += dt;
                 shot.Y -= 220 * dt;
                 Chicken hitChicken = null;
                 foreach (Chicken chicken in Chickens)
@@ -1459,7 +1513,7 @@ namespace RottenEggs
         /// </summary>
         private void SpawnCrackedEgg(FallingEgg egg)
         {
-            CrackedEggs.Add(new CrackedEgg(egg.Kind, egg.X, GroundY + 1, 1.1));
+            CrackedEggs.Add(new CrackedEgg(egg.Kind, egg.X, GroundY - EggH, 1.1));
         }
 
         private void SpawnParticles(double x, double y, Color32 color, int count, double strength)

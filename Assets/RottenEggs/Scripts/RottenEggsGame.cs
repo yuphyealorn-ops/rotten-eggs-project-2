@@ -27,12 +27,10 @@ namespace RottenEggs
         [SerializeField]
         private bool runSelfTestOnStart = false;
 
-        /// <summary>How far the left stick must tilt before it counts as a move.</summary>
-        private const float GamepadDeadZone = 0.4f;
-
         private GameModel model;
         private AudioManager audioManager;
         private ChickenSprites sprites;
+        private EggSprites eggSprites;
         private PixelCanvas canvas;
         private GameRenderer frameRenderer;
         private Texture2D frameTexture;
@@ -41,6 +39,9 @@ namespace RottenEggs
         private double menuClock;
         private int menuSelection;
         private bool ready;
+        private bool paused;
+        private int pauseSelection;
+        private readonly GamepadControls controller = new GamepadControls();
 
         private void Awake()
         {
@@ -49,17 +50,19 @@ namespace RottenEggs
             try
             {
                 sprites = ChickenSprites.Load();
+                eggSprites = EggSprites.Load();
             }
             catch (System.Exception exception)
             {
                 Debug.LogError("Rotten Eggs could not start: " + exception.Message
-                               + "\nExpected the chicken sheets in " + ChickenSprites.SpritesDirectory);
+                               + "\nExpected chicken sheets in " + ChickenSprites.SpritesDirectory
+                               + " and egg artwork in Resources/Sprites/eggs.");
                 enabled = false;
                 return;
             }
 
             canvas = new PixelCanvas(GameModel.WorldW, GameModel.WorldH);
-            frameRenderer = new GameRenderer(canvas, sprites, BackgroundArt.Load(), HeartSprites.Load());
+            frameRenderer = new GameRenderer(canvas, sprites, eggSprites, BackgroundArt.Load(), HeartSprites.Load());
             frameTexture = new Texture2D(GameModel.WorldW, GameModel.WorldH, TextureFormat.RGBA32, false)
             {
                 filterMode = FilterMode.Point,
@@ -84,96 +87,129 @@ namespace RottenEggs
                 return;
             }
 
-            HandleMenuKeys();
-            HandleAudioKeys();
-
-            // A controller drives player one alongside the keys; player two
-            // stays on the arrow keys for now.
-            int p1Axis = ClampAxis((Held(GameKey.D) ? 1 : 0) - (Held(GameKey.A) ? 1 : 0) + GamepadAxis());
-            int p2Axis = (Held(GameKey.Right) ? 1 : 0) - (Held(GameKey.Left) ? 1 : 0);
-            if (model.Mode == Mode.Single)
-            {
-                p1Axis = ClampAxis(p1Axis + p2Axis);
-                p2Axis = 0;
-            }
-
-            if (Pressed(GameKey.Space) || GamepadFirePressed())
-            {
-                model.Fire(0);
-            }
-
+            GamepadControls.Frame pad = controller.Read(model.Phase == Phase.Menu || paused);
             double dt = Time.deltaTime;
-            menuClock += dt;
-            model.Update(dt, p1Axis, p2Axis);
-            PlayModelEvents();
-
-            frameRenderer.Render(model, audioManager, menuClock, menuSelection);
+            Tick(dt, pad);
+            menuClock += Time.unscaledDeltaTime;
+            frameRenderer.Render(model, audioManager, menuClock, menuSelection, controller.Used, paused, pauseSelection);
             canvas.UploadTo(frameTexture);
         }
 
-        private void HandleMenuKeys()
+        private void Tick(double dt, GamepadControls.Frame pad)
         {
-            if (model.Phase != Phase.Menu)
+            bool changedScreen = HandleMenuKeys(pad);
+            HandleAudioKeys(pad);
+            if (!paused && !changedScreen)
             {
-                if (Pressed(GameKey.R) || (Pressed(GameKey.Enter) && model.Phase != Phase.Playing))
+                // The controller drives P1; P2 retains the keyboard arrows in Duo.
+                int p1Axis = ClampAxis((Held(GameKey.D) ? 1 : 0) - (Held(GameKey.A) ? 1 : 0) + pad.Move);
+                int p2Axis = (Held(GameKey.Right) ? 1 : 0) - (Held(GameKey.Left) ? 1 : 0);
+                if (model.Mode == Mode.Single)
                 {
-                    RestartRound();
+                    p1Axis = ClampAxis(p1Axis + p2Axis);
+                    p2Axis = 0;
                 }
-
-                if (Pressed(GameKey.Escape))
-                {
-                    ReturnToMenu();
-                }
-
-                return;
+                if (Pressed(GameKey.Space) || pad.Fire) model.Fire(0);
+                model.Update(dt, p1Axis, p2Axis);
             }
-
-            if (Pressed(GameKey.Up) || Pressed(GameKey.W))
-            {
-                NavigateMenu(-1);
-            }
-
-            if (Pressed(GameKey.Down) || Pressed(GameKey.S))
-            {
-                NavigateMenu(1);
-            }
-
-            if (Pressed(GameKey.Enter))
-            {
-                ConfirmSelection();
-            }
-
-            if (Pressed(GameKey.One))
-            {
-                StartMode(Mode.Single);
-            }
-
-            if (Pressed(GameKey.Two))
-            {
-                StartMode(Mode.Duo);
-            }
+            PlayModelEvents();
         }
 
-        private void HandleAudioKeys()
+        // A transition consumes the frame so confirm/back cannot also throw or move.
+        private bool HandleMenuKeys(GamepadControls.Frame pad)
         {
-            if (Pressed(GameKey.M))
+            int navigation = pad.Navigate;
+            if (Pressed(GameKey.Up) || Pressed(GameKey.W)) navigation--;
+            if (Pressed(GameKey.Down) || Pressed(GameKey.S)) navigation++;
+            navigation = ClampAxis(navigation);
+
+            if (model.Phase == Phase.Menu)
+            {
+                if (navigation != 0) NavigateMenu(navigation);
+                if (Pressed(GameKey.Enter) || pad.Confirm || pad.Pause)
+                {
+                    ConfirmSelection();
+                    return true;
+                }
+                if (Pressed(GameKey.One)) { StartMode(Mode.Single); return true; }
+                if (Pressed(GameKey.Two)) { StartMode(Mode.Duo); return true; }
+                return false;
+            }
+
+            if (paused)
+            {
+                if (Pressed(GameKey.P) || Pressed(GameKey.Escape) || pad.Pause || pad.Back)
+                {
+                    TogglePause();
+                    return true;
+                }
+                if (Pressed(GameKey.R) || pad.Restart) { RestartRound(); return true; }
+                if (navigation != 0)
+                {
+                    pauseSelection = (pauseSelection + navigation + 4) % 4;
+                    audioManager.Play(AudioManager.Sfx.UiMove);
+                }
+                if (Pressed(GameKey.Enter) || pad.Confirm)
+                {
+                    switch (pauseSelection)
+                    {
+                        case 0: TogglePause(); break;
+                        case 1: RestartRound(); break;
+                        case 2: ReturnToMenu(); break;
+                        case 3: QuitGame(); break;
+                    }
+                    return true;
+                }
+                return false;
+            }
+
+            if (model.Phase == Phase.Playing && (Pressed(GameKey.P) || pad.Pause))
+            {
+                TogglePause();
+                return true;
+            }
+            if (Pressed(GameKey.Escape) || (model.Phase != Phase.Playing && pad.Back))
+            {
+                ReturnToMenu();
+                return true;
+            }
+            if (Pressed(GameKey.R) || pad.Restart
+                || (model.Phase != Phase.Playing && (Pressed(GameKey.Enter) || pad.Confirm)))
+            {
+                RestartRound();
+                return true;
+            }
+            return false;
+        }
+
+        private void HandleAudioKeys(GamepadControls.Frame pad)
+        {
+            if (Pressed(GameKey.M) || pad.Mute)
             {
                 bool mutedNow = audioManager.ToggleMute();
-                if (!mutedNow)
-                {
-                    audioManager.Play(AudioManager.Sfx.UiConfirm);
-                }
+                if (!mutedNow) audioManager.Play(AudioManager.Sfx.UiConfirm);
             }
-
-            if (Pressed(GameKey.Minus) || Pressed(GameKey.NumpadMinus))
-            {
+            if (Pressed(GameKey.Minus) || Pressed(GameKey.NumpadMinus) || pad.Volume < 0)
                 AdjustVolume(-0.10f);
-            }
-
-            if (Pressed(GameKey.Equals) || Pressed(GameKey.NumpadPlus))
-            {
+            if (Pressed(GameKey.Equals) || Pressed(GameKey.NumpadPlus) || pad.Volume > 0)
                 AdjustVolume(0.10f);
-            }
+        }
+
+        private void TogglePause()
+        {
+            if (model.Phase != Phase.Playing) return;
+            paused = !paused;
+            pauseSelection = 0;
+            audioManager.Play(AudioManager.Sfx.UiConfirm);
+        }
+
+        private void QuitGame()
+        {
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+#else
+            Application.Quit();
+#endif
         }
 
         private void NavigateMenu(int direction)
@@ -183,7 +219,7 @@ namespace RottenEggs
                 return;
             }
 
-            menuSelection = ((menuSelection + direction) % 2 + 2) % 2;
+            menuSelection = (menuSelection + direction + 3) % 3;
             audioManager.Play(AudioManager.Sfx.UiMove);
         }
 
@@ -194,7 +230,8 @@ namespace RottenEggs
                 return;
             }
 
-            StartMode(menuSelection == 0 ? Mode.Single : Mode.Duo);
+            if (menuSelection == 2) QuitGame();
+            else StartMode(menuSelection == 0 ? Mode.Single : Mode.Duo);
         }
 
         private void StartMode(Mode selectedMode)
@@ -206,6 +243,7 @@ namespace RottenEggs
 
             // Single player always opens on stage 1 and chains the rest in as they
             // are cleared; Duo has no stages.
+            paused = false;
             model.StartRound(selectedMode, Stage.Stage1);
             audioManager.Play(AudioManager.Sfx.UiConfirm);
             audioManager.PlayMusic(AudioManager.Music.Game);
@@ -213,6 +251,7 @@ namespace RottenEggs
 
         private void RestartRound()
         {
+            paused = false;
             model.RestartCurrentMode();
             audioManager.Play(AudioManager.Sfx.UiConfirm);
             audioManager.PlayMusic(AudioManager.Music.Game);
@@ -225,6 +264,7 @@ namespace RottenEggs
                 return;
             }
 
+            paused = false;
             model.ReturnToMenu();
             audioManager.Play(AudioManager.Sfx.UiMove);
             audioManager.PlayMusic(AudioManager.Music.Menu);
@@ -346,6 +386,7 @@ namespace RottenEggs
             Debug.Log(GameModelSelfTest.Run());
             Debug.Log(AudioManager.VerifyBundledAssets());
             Debug.Log(ChickenSprites.VerifyBundledAssets());
+            Debug.Log(EggSprites.VerifyBundledAssets());
         }
 
         private enum GameKey
@@ -363,6 +404,7 @@ namespace RottenEggs
             One,
             Two,
             R,
+            P,
             Escape,
             M,
             Minus,
@@ -389,6 +431,7 @@ namespace RottenEggs
                 case GameKey.One: return Key.Digit1;
                 case GameKey.Two: return Key.Digit2;
                 case GameKey.R: return Key.R;
+                case GameKey.P: return Key.P;
                 case GameKey.Escape: return Key.Escape;
                 case GameKey.M: return Key.M;
                 case GameKey.Minus: return Key.Minus;
@@ -420,53 +463,7 @@ namespace RottenEggs
             return keyboard[Mapped(key)].wasPressedThisFrame;
         }
 
-        /// <summary>
-        /// Left stick as a digital axis for player one: -1, 0 or 1, so a pad
-        /// moves the basket exactly like the keys do. The dead zone stops a
-        /// resting stick from creeping.
-        /// </summary>
-        private static int GamepadAxis()
-        {
-            Gamepad pad = Gamepad.current;
-            if (pad == null)
-            {
-                return 0;
-            }
-
-            float x = pad.leftStick.ReadValue().x;
-            if (x > GamepadDeadZone)
-            {
-                return 1;
-            }
-
-            if (x < -GamepadDeadZone)
-            {
-                return -1;
-            }
-
-            return 0;
-        }
-
-        /// <summary>The east face button — B on an Xbox pad, Circle on PlayStation.</summary>
-        private static bool GamepadFirePressed()
-        {
-            Gamepad pad = Gamepad.current;
-            return pad != null && pad.buttonEast.wasPressedThisFrame;
-        }
 #else
-        // The legacy input manager's joystick mapping differs per platform, and
-        // this project runs on the Input System package, so the pad is only
-        // wired up on that side.
-        private static int GamepadAxis()
-        {
-            return 0;
-        }
-
-        private static bool GamepadFirePressed()
-        {
-            return false;
-        }
-
         private static KeyCode Mapped(GameKey key)
         {
             switch (key)
@@ -484,6 +481,7 @@ namespace RottenEggs
                 case GameKey.One: return KeyCode.Alpha1;
                 case GameKey.Two: return KeyCode.Alpha2;
                 case GameKey.R: return KeyCode.R;
+                case GameKey.P: return KeyCode.P;
                 case GameKey.Escape: return KeyCode.Escape;
                 case GameKey.M: return KeyCode.M;
                 case GameKey.Minus: return KeyCode.Minus;

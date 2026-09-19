@@ -397,6 +397,12 @@ namespace RottenEggs
         /// </summary>
         public void DrawSprite(SpriteFrame frame, int destX0, int destY0, int destX1, int destY1)
         {
+            DrawSprite(frame, destX0, destY0, destX1, destY1, new Color32(255, 255, 255, 255));
+        }
+
+        /// <summary>Multiplies sprite RGB and alpha without changing its cached pixels.</summary>
+        public void DrawSprite(SpriteFrame frame, int destX0, int destY0, int destX1, int destY1, Color32 tint)
+        {
             int left = Math.Min(destX0, destX1);
             int right = Math.Max(destX0, destX1);
             int top = Math.Min(destY0, destY1);
@@ -434,7 +440,9 @@ namespace RottenEggs
                     }
 
                     Color32 previous = color;
-                    color = source;
+                    color = new Color32((byte)(source.r * tint.r / 255),
+                        (byte)(source.g * tint.g / 255), (byte)(source.b * tint.b / 255),
+                        (byte)(source.a * tint.a / 255));
                     Blend(left + column, top + row);
                     color = previous;
                 }
