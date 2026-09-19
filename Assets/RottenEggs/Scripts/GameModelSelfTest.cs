@@ -211,7 +211,9 @@ namespace RottenEggs
                 "a downed stage-2 chicken must start its respawn countdown");
             checks++;
 
-            for (int i = 0; i < 120; i++)
+            // Run one second past the respawn delay, whatever the rules set it to.
+            int respawnTicks = (int)Math.Ceiling((GameModel.Stage2RespawnSeconds + 1.0) / 0.05);
+            for (int i = 0; i < respawnTicks; i++)
             {
                 stages.Update(0.05, 0, 0);
             }
@@ -593,6 +595,108 @@ namespace RottenEggs
                     && model.Player(0).ThrowTime == -1
                     && !model.Player(0).PendingThrow,
                 "Escape flow must return the model to the menu and clear animation state");
+            checks++;
+
+            // ── Boss fight ────────────────────────────────────────────────────
+            GameModel bossRun = new GameModel();
+            bossRun.StartRound(Mode.Single, Stage.BossStage);
+            GameModel.Chicken bossChicken = bossRun.Chickens[0];
+            GameModel.PlayerState hero = bossRun.Player(0);
+            // The bossChicken keeps laying eggs; drain them so only its attacks touch the hero here.
+            Action tick = () =>
+            {
+                bossRun.Update(0.05, 0, 0);
+                bossRun.FallingEggs.Clear();
+            };
+            Require(bossChicken.IsBoss && bossChicken.BossPhase == BossPhase.Fly && !bossChicken.BossVulnerable,
+                "the bossChicken must open the fight airborne and armoured");
+            checks++;
+
+            // An egg thrown at the awake bossChicken is spent but does no damage.
+            hero.Ammo = 5;
+            int hpBefore = bossChicken.Hp;
+            bossRun.Shots.Add(new GameModel.Shot(bossChicken.CenterX - GameModel.EggW / 2, bossChicken.DrawY + 10));
+            tick();
+            Require(bossChicken.Hp == hpBefore && bossRun.Shots.Count == 0,
+                "an awake bossChicken must shrug an egg off without losing health");
+            checks++;
+
+            // Flying long enough launches a feather strike aimed at the basket.
+            for (int i = 0; i < 30 && bossRun.Feathers.Count == 0; i++)
+            {
+                tick();
+            }
+
+            Require(bossRun.Feathers.Count == 1
+                    && Math.Abs(bossRun.Feathers[0].X - (hero.BasketX + GameModel.BasketW / 2)) < 0.001,
+                "the flying bossChicken must send a feather strike at the basket's position");
+            checks++;
+
+            // Standing still under it costs half a heart; a shield takes it instead.
+            hero.ShieldCount = 1;
+            int livesBefore = hero.LivesHalf;
+            for (int i = 0; i < 40 && bossRun.Feathers.Count > 0; i++)
+            {
+                tick();
+            }
+
+            Require(hero.ShieldCount == 0 && hero.LivesHalf == livesBefore,
+                "a feather strike must be absorbed by a shield before it touches hearts");
+            checks++;
+
+            // Cycle: the bossChicken lands to bomb, then falls asleep and becomes vulnerable.
+            while (bossChicken.BossPhase == BossPhase.Fly)
+            {
+                tick();
+            }
+
+            Require(bossChicken.BossPhase == BossPhase.Bomb, "after flying the bossChicken must land and start bombing");
+            checks++;
+
+            for (int i = 0; i < 80 && bossRun.Bombs.Count == 0; i++)
+            {
+                tick();
+            }
+
+            Require(bossRun.Bombs.Count >= 1, "the bombing bossChicken must drop a bomb on its jump");
+            checks++;
+
+            // Park the basket under the bomb and let it go off.
+            GameModel.Bomb bomb = bossRun.Bombs[0];
+            hero.BasketX = bomb.CenterX - GameModel.BasketW / 2;
+            livesBefore = hero.LivesHalf;
+            hero.ShieldCount = 0;
+            for (int i = 0; i < 80 && !bomb.Hurt && bossRun.Bombs.Contains(bomb); i++)
+            {
+                tick();
+                hero.BasketX = bomb.CenterX - GameModel.BasketW / 2;
+            }
+
+            Require(hero.LivesHalf == livesBefore - 1, "a bomb going off under the basket must cost half a heart");
+            checks++;
+
+            while (bossChicken.BossPhase == BossPhase.Bomb)
+            {
+                tick();
+            }
+
+            Require(bossChicken.BossPhase == BossPhase.Sleep && bossChicken.BossVulnerable,
+                "after bombing the bossChicken must fall asleep and drop its guard");
+            checks++;
+
+            hpBefore = bossChicken.Hp;
+            bossRun.Shots.Add(new GameModel.Shot(bossChicken.CenterX - GameModel.EggW / 2, bossChicken.DrawY + 10));
+            tick();
+            Require(bossChicken.Hp == hpBefore - 1, "an egg must hurt the sleeping bossChicken");
+            checks++;
+
+            while (bossChicken.BossPhase == BossPhase.Sleep)
+            {
+                tick();
+            }
+
+            Require(bossChicken.BossPhase == BossPhase.Fly && bossRun.Bombs.Count == 0,
+                "the bossChicken must wake back into flight with the field cleared");
             checks++;
 
             return "SELF-TEST PASSED: " + checks + " gameplay checks";

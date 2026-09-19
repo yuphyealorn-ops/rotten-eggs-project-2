@@ -23,6 +23,7 @@ namespace RottenEggs
     public sealed class ChickenSprites
     {
         private const int FrameWidth = 20;
+        private const int FlyFrameWidth = 32;
         private const int FrameHeight = 21;
         private const double DefaultFrameSeconds = 0.10;
 
@@ -93,7 +94,7 @@ namespace RottenEggs
                 string filename = ResourceFor(state);
                 try
                 {
-                    sprites.animations[state] = Slice(filename);
+                    sprites.animations[state] = Slice(filename, FrameWidthFor(state));
                 }
                 catch (Exception exception)
                 {
@@ -135,9 +136,22 @@ namespace RottenEggs
                     return "chicken-damage.png";
                 case AnimState.Die:
                     return "chicken-die.png";
+                case AnimState.Fly:
+                    return "chicken-fly.png";
+                case AnimState.Sleeping:
+                    return "chicken-sleeping.png";
                 default:
                     throw new ArgumentOutOfRangeException("state");
             }
+        }
+
+        /// <summary>
+        /// Frame width per clip. The flying sheet is wider than the rest because
+        /// the wings spread past the body; every other clip is 20px.
+        /// </summary>
+        private static int FrameWidthFor(AnimState state)
+        {
+            return state == AnimState.Fly ? FlyFrameWidth : FrameWidth;
         }
 
         /// <summary>
@@ -145,7 +159,7 @@ namespace RottenEggs
         /// texture rows bottom-up, so each frame is flipped into the top-down
         /// order the pixel canvas draws with.
         /// </summary>
-        private static Animation Slice(string filename)
+        private static Animation Slice(string filename, int frameWidth)
         {
             string path = Path.Combine(SpritesDirectory, filename);
             if (!File.Exists(path))
@@ -163,13 +177,13 @@ namespace RottenEggs
 
             try
             {
-                if (sheet.height != FrameHeight || sheet.width % FrameWidth != 0)
+                if (sheet.height != FrameHeight || sheet.width % frameWidth != 0)
                 {
-                    throw new IOException("must be a strip of " + FrameWidth + " x " + FrameHeight + " frames, but is "
+                    throw new IOException("must be a strip of " + frameWidth + " x " + FrameHeight + " frames, but is "
                                           + sheet.width + " x " + sheet.height);
                 }
 
-                int frameCount = sheet.width / FrameWidth;
+                int frameCount = sheet.width / frameWidth;
                 if (frameCount <= 0)
                 {
                     throw new IOException("holds no frames");
@@ -181,18 +195,18 @@ namespace RottenEggs
 
                 for (int frame = 0; frame < frameCount; frame++)
                 {
-                    Color32[] pixels = new Color32[FrameWidth * FrameHeight];
+                    Color32[] pixels = new Color32[frameWidth * FrameHeight];
                     for (int row = 0; row < FrameHeight; row++)
                     {
                         int sourceRow = FrameHeight - 1 - row;
-                        for (int column = 0; column < FrameWidth; column++)
+                        for (int column = 0; column < frameWidth; column++)
                         {
-                            pixels[row * FrameWidth + column] =
-                                sheetPixels[sourceRow * sheet.width + frame * FrameWidth + column];
+                            pixels[row * frameWidth + column] =
+                                sheetPixels[sourceRow * sheet.width + frame * frameWidth + column];
                         }
                     }
 
-                    frames.Add(new SpriteFrame(FrameWidth, FrameHeight, pixels));
+                    frames.Add(new SpriteFrame(frameWidth, FrameHeight, pixels));
                     frameSeconds.Add(DefaultFrameSeconds);
                 }
 
@@ -218,7 +232,7 @@ namespace RottenEggs
                 string filename = ResourceFor(state);
                 try
                 {
-                    Animation animation = Slice(filename);
+                    Animation animation = Slice(filename, FrameWidthFor(state));
                     if (animation.FrameCount == 0)
                     {
                         failures.Add(filename + " sliced to zero frames");

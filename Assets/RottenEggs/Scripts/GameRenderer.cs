@@ -73,6 +73,9 @@ namespace RottenEggs
         /// </summary>
         private readonly HeartSprites hearts;
 
+        /// <summary>Boss attack artwork; any missing clip is drawn procedurally.</summary>
+        private readonly BossSprites bossArt;
+
         /// <summary>
         /// Running clock (seconds) used for retro blink / animation effects.
         /// Set once at the top of Render() and read by every sub-drawer that
@@ -83,13 +86,15 @@ namespace RottenEggs
         private static readonly string[] PauseOptions = { "RESUME", "RESTART", "MAIN MENU", "QUIT GAME" };
 
         public GameRenderer(PixelCanvas canvas, ChickenSprites sprites, EggSprites eggs,
-                            SpriteFrame backdrop = null, HeartSprites hearts = null)
+                            SpriteFrame backdrop = null, HeartSprites hearts = null,
+                            BossSprites bossArt = null)
         {
             this.canvas   = canvas;
             this.sprites  = sprites;
             this.eggs     = eggs;
             this.backdrop = backdrop;
             this.hearts   = hearts;
+            this.bossArt  = bossArt;
         }
 
         // ══════════════════════════════════════════════════════════════════════
@@ -132,6 +137,7 @@ namespace RottenEggs
 
             DrawParticles(model);
             DrawCrackedEggs(model);
+            DrawBossHazards(model);
             canvas.ResetTranslate();
 
             if (model.Mode == Mode.Single)
@@ -442,13 +448,17 @@ namespace RottenEggs
 
             foreach (GameModel.Chicken chicken in model.Chickens)
             {
-                DrawChicken(chicken.CenterX, chicken.Y, chicken.Anim, chicken.AnimTime,
+                DrawChicken(chicken.CenterX, chicken.DrawY, chicken.Anim, chicken.AnimTime,
                     chicken.Facing > 0, ChickenDrawScale(chicken));
                 if (chicken.Alive())
                 {
                     if (chicken.IsBoss)
                     {
-                        DrawBossHealthBar(chicken.Hp, 8, chicken.CenterX, (int)chicken.Y - 8);
+                        DrawBossHealthBar(chicken.Hp, GameModel.BossHp, chicken.CenterX, (int)chicken.DrawY - 8);
+                        if (chicken.BossVulnerable)
+                        {
+                            DrawSleepMarker(chicken);
+                        }
                     }
                     else
                     {
@@ -678,6 +688,244 @@ namespace RottenEggs
             }
         }
 
+        // ══════════════════════════════════════════════════════════════════════
+        // Boss fight
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Drifting "Z"s over a sleeping boss, and a pulsing ring around its
+        /// health bar: the one moment it can be hurt should be unmistakable.
+        /// </summary>
+        private void DrawSleepMarker(GameModel.Chicken boss)
+        {
+            int cx = (int)Math.Round(boss.CenterX);
+            int top = (int)boss.DrawY;
+            for (int i = 0; i < 3; i++)
+            {
+                double phase = (_clock * 0.9 + i * 0.33) % 1.0;
+                int zx = cx + 22 + i * 6 + (int)(Math.Sin(phase * Math.PI * 2) * 3);
+                int zy = top + 4 - (int)(phase * 22);
+                byte alpha = (byte)(255 * (1.0 - phase));
+                canvas.SetColor(White.r, White.g, White.b, alpha);
+                PixelFont.Draw(canvas, "Z", zx, zy, FontTiny);
+            }
+
+            if ((int)(_clock * 3.0) % 2 == 0)
+            {
+                canvas.SetColor(GameModel.Gold, 200);
+                int width = GameModel.BossHp * 9 + 6;
+                int x = cx - width / 2;
+                int y = top - 10;
+                canvas.FillRect(x, y, width, 1);
+                canvas.FillRect(x, y + 10, width, 1);
+                canvas.FillRect(x, y, 1, 11);
+                canvas.FillRect(x + width - 1, y, 1, 11);
+            }
+        }
+
+        private void DrawBossHazards(GameModel model)
+        {
+            foreach (GameModel.FeatherStrike strike in model.Feathers)
+            {
+                DrawFeatherStrike(strike);
+            }
+
+            foreach (GameModel.Bomb bomb in model.Bombs)
+            {
+                if (bomb.Exploded)
+                {
+                    DrawExplosion(bomb);
+                }
+                else
+                {
+                    DrawBomb(bomb);
+                }
+            }
+        }
+
+        /// <summary>
+        /// A 24×24 bomb: the fuse burns down over five frames once it has landed.
+        /// Drawn flat while still falling.
+        /// </summary>
+        private void DrawBomb(GameModel.Bomb bomb)
+        {
+            int x = (int)Math.Round(bomb.X);
+            int y = (int)Math.Round(bomb.Y);
+            int size = GameModel.BombSize;
+            double fuse = bomb.Landed ? bomb.FuseTime / GameModel.BombFuseSeconds : 0;
+
+            if (bossArt != null && bossArt.Bomb != null)
+            {
+                canvas.DrawSprite(BossSprites.FrameFor(bossArt.Bomb, bomb.FuseTime, GameModel.BombFuseSeconds),
+                                  x, y, x + size, y + size);
+                return;
+            }
+
+            // Body: dark ball with a highlight, flushing red as the fuse runs out.
+            bool aboutToBlow = fuse > 0.7 && (int)(_clock * 12.0) % 2 == 0;
+            canvas.SetColor(aboutToBlow ? new Color32(140, 40, 40, 255) : new Color32(30, 32, 40, 255));
+            canvas.FillOval(x + 3, y + 7, 18, 16);
+            canvas.SetColor(GameModel.Dark);
+            canvas.DrawArc(x + 3, y + 7, 18, 16, 0, 360, 1);
+            canvas.SetColor(90, 96, 110);
+            canvas.FillOval(x + 7, y + 10, 5, 4);
+
+            // Fuse: a short stub that shrinks with the burn, tipped with a spark.
+            int fuseLength = (int)Math.Round(6 * (1.0 - fuse));
+            canvas.SetColor(WoodDark);
+            for (int i = 0; i <= fuseLength; i++)
+            {
+                canvas.FillRect(x + 12 + i, y + 7 - i, 2, 2);
+            }
+
+            if (bomb.Landed)
+            {
+                int sparkX = x + 12 + fuseLength;
+                int sparkY = y + 7 - fuseLength;
+                canvas.SetColor((int)(_clock * 20.0) % 2 == 0 ? GameModel.Gold : White);
+                canvas.FillRect(sparkX - 1, sparkY - 1, 4, 4);
+            }
+        }
+
+        /// <summary>
+        /// A 48×48 blast centred on the bomb: a fireball that swells and cools
+        /// into smoke over six frames.
+        /// </summary>
+        private void DrawExplosion(GameModel.Bomb bomb)
+        {
+            int cx = (int)Math.Round(bomb.CenterX);
+            int cy = (int)Math.Round(bomb.Y + GameModel.BombSize / 2.0);
+            int size = GameModel.BlastSize;
+            int x = cx - size / 2;
+            int y = cy - size / 2;
+
+            if (bossArt != null && bossArt.Explosion != null)
+            {
+                canvas.DrawSprite(BossSprites.FrameFor(bossArt.Explosion, bomb.BlastTime, GameModel.BombExplodeSeconds),
+                                  x, y, x + size, y + size);
+                return;
+            }
+
+            double t = Math.Min(1.0, bomb.BlastTime / GameModel.BombExplodeSeconds);
+            int radius = (int)Math.Round(6 + 18 * Math.Min(1.0, t * 2.0));
+            byte alpha = (byte)(255 * (t < 0.5 ? 1.0 : 1.0 - (t - 0.5) * 2.0));
+            Color32 fill = t < 0.25 ? GameModel.Gold
+                         : t < 0.5  ? new Color32(255, 140, 40, 255)
+                         : new Color32(120, 116, 112, 255);
+            canvas.SetColor(fill, alpha);
+            canvas.FillOval(cx - radius, cy - radius, radius * 2, radius * 2);
+            if (t < 0.5)
+            {
+                canvas.SetColor(White, alpha);
+                canvas.FillOval(cx - radius / 2, cy - radius / 2, radius, radius);
+            }
+        }
+
+        /// <summary>
+        /// A 48×48 feather flock. It gathers over the target, dives to the
+        /// basket row, and bursts; a dotted line marks the landing spot while
+        /// it winds up so the player has a fair chance to move.
+        /// </summary>
+        private void DrawFeatherStrike(GameModel.FeatherStrike strike)
+        {
+            int cx = (int)Math.Round(strike.X);
+            int size = GameModel.BlastSize;
+            int groundY = (int)GameModel.BasketRimY;
+            double hoverY = GameModel.FeatherHoverY;
+
+            // Where the flock's centre is this frame.
+            double centreY;
+            if (strike.WindingUp)
+            {
+                centreY = hoverY;
+            }
+            else if (strike.Plunging)
+            {
+                double p = (strike.Time - GameModel.FeatherWindupSeconds) / GameModel.FeatherPlungeSeconds;
+                centreY = hoverY + (groundY - hoverY) * p;
+            }
+            else
+            {
+                centreY = groundY;
+            }
+
+            int cy = (int)Math.Round(centreY);
+
+            // Telegraph the landing spot while there is still time to move.
+            if (strike.WindingUp)
+            {
+                canvas.SetColor(White, (byte)((int)(_clock * 8.0) % 2 == 0 ? 170 : 90));
+                for (int y = cy + 26; y < groundY; y += 5)
+                {
+                    canvas.FillRect(cx, y, 1, 2);
+                }
+            }
+
+            if (bossArt != null && bossArt.Flock != null)
+            {
+                // Frames 1-5 gather, 6-7 dive, 8-10 burst.
+                int frame;
+                if (strike.WindingUp)
+                {
+                    frame = (int)(5 * strike.Time / GameModel.FeatherWindupSeconds);
+                }
+                else if (strike.Plunging)
+                {
+                    frame = 5 + (int)(2 * (strike.Time - GameModel.FeatherWindupSeconds) / GameModel.FeatherPlungeSeconds);
+                }
+                else
+                {
+                    frame = 7 + (int)(3 * (strike.Time - GameModel.FeatherWindupSeconds - GameModel.FeatherPlungeSeconds)
+                                      / GameModel.FeatherImpactSeconds);
+                }
+
+                frame = Math.Max(0, Math.Min(9, frame));
+                canvas.DrawSprite(bossArt.Flock[frame], cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2);
+                return;
+            }
+
+            // Procedural flock: eight feathers that orbit, then streak, then scatter.
+            const int feathers = 8;
+            for (int i = 0; i < feathers; i++)
+            {
+                double angle = i * (Math.PI * 2 / feathers);
+                int fx, fy, fw, fh;
+                byte alpha = 230;
+                if (strike.WindingUp)
+                {
+                    double spin = _clock * 6.0 + angle;
+                    double radius = 12 + 4 * Math.Sin(_clock * 9.0 + i);
+                    fx = cx + (int)Math.Round(Math.Cos(spin) * radius);
+                    fy = cy + (int)Math.Round(Math.Sin(spin) * radius * 0.6);
+                    fw = 5;
+                    fh = 3;
+                }
+                else if (strike.Plunging)
+                {
+                    fx = cx + (int)Math.Round(Math.Cos(angle) * 4);
+                    fy = cy - 14 + i * 3;
+                    fw = 3;
+                    fh = 7;
+                }
+                else
+                {
+                    double p = (strike.Time - GameModel.FeatherWindupSeconds - GameModel.FeatherPlungeSeconds)
+                               / GameModel.FeatherImpactSeconds;
+                    double radius = 22 * p;
+                    fx = cx + (int)Math.Round(Math.Cos(angle) * radius);
+                    fy = cy - 4 - (int)Math.Round(Math.Abs(Math.Sin(angle)) * radius * 0.5);
+                    fw = 4;
+                    fh = 3;
+                    alpha = (byte)(230 * (1.0 - p));
+                }
+
+                canvas.SetColor(White, alpha);
+                canvas.FillOval(fx - fw / 2, fy - fh / 2, fw, fh);
+                canvas.SetColor(Muted, (byte)(alpha / 2));
+                canvas.FillRect(fx, fy - fh / 2, 1, fh);
+            }
+        }
+
         private void DrawEgg(int x, int y, EggKind kind, bool thrown, double age = 0)
         {
             SpriteFrame frame = thrown ? eggs.Thrown.FrameAt(age, true) : eggs.Falling(kind).FrameAt(age, true);
@@ -819,7 +1067,7 @@ namespace RottenEggs
                     GameModel.Ice, GameModel.Dark, FontTiny);
             }
 
-            DrawEffectBar(player, 8, 202, 120, GameModel.Pink);
+            DrawEffectBars(player, 8, 202, 120, 5.0);
             if (player.StatusTimer > 0 && model.Phase == Phase.Playing)
             {
                 DrawCenteredText(player.StatusText, 240, 197, White, GameModel.Dark, FontSmall);
@@ -900,26 +1148,58 @@ namespace RottenEggs
         /// <summary>
         /// Day 3: the speed bar flashes on its final second to warn the player.
         /// </summary>
-        private void DrawEffectBar(GameModel.PlayerState player, int x, int y, int width, Color32 accent)
+        /// <summary>
+        /// One countdown bar per active power-up, stacked upward from
+        /// <paramref name="bottomY"/> so the list grows away from the basket.
+        /// Timed effects drain over their full duration and flash in their
+        /// last second; shields have no timer, so they show as a full bar with
+        /// the count. Colours match the egg that granted each effect.
+        /// </summary>
+        private void DrawEffectBars(GameModel.PlayerState player, int x, int bottomY, int width, double speedSeconds)
         {
-            if (player.SpeedTime <= 0)
+            int y = bottomY;
+            y = DrawEffectRow(x, y, width, player.SpeedTime,     speedSeconds, GameModel.ColorFor(EggKind.Speed),    "SPEED");
+            y = DrawEffectRow(x, y, width, player.SlowDownTimer, 5.0,          GameModel.ColorFor(EggKind.SlowDown), "SLOW EGGS");
+            y = DrawEffectRow(x, y, width, player.FreezeTime,    2.0,          GameModel.ColorFor(EggKind.Freeze),   "FROZEN");
+            y = DrawEffectRow(x, y, width, player.ReverseTime,   3.0,          GameModel.ColorFor(EggKind.Reverse),  "REVERSED");
+            y = DrawEffectRow(x, y, width, player.SabotageTime,  5.0,          GameModel.ColorFor(EggKind.Golden),   "EGG STORM");
+
+            if (player.ShieldCount > 0)
             {
-                return;
+                Color32 mint = GameModel.ColorFor(EggKind.Shield);
+                canvas.SetColor(GameModel.Dark);
+                canvas.FillRect(x, y, width, 7);
+                canvas.SetColor(mint);
+                canvas.FillRect(x + 2, y + 2, width - 4, 3);
+                DrawShadowText("SHIELD x" + player.ShieldCount, x + width + 6, y + 6, mint, GameModel.Dark, FontTiny);
+            }
+        }
+
+        /// <summary>
+        /// Draws one bar if the effect is running and returns the row above it.
+        /// A bar that is blinked off this frame still takes its row, so the
+        /// stack never shuffles while something flashes.
+        /// </summary>
+        private int DrawEffectRow(int x, int y, int width, double remaining, double total, Color32 color, string label)
+        {
+            if (remaining <= 0)
+            {
+                return y;
             }
 
             // Flash at 4 Hz when less than 1 second remains
-            bool lastSecond = player.SpeedTime < 1.0;
-            if (lastSecond && (int)(_clock * 4.0) % 2 != 0)
+            bool blinkedOff = remaining < 1.0 && (int)(_clock * 4.0) % 2 != 0;
+            if (!blinkedOff)
             {
-                return;
+                int fill = (int)Math.Round((width - 4) * Math.Min(1.0, remaining / total));
+                canvas.SetColor(GameModel.Dark);
+                canvas.FillRect(x, y, width, 7);
+                canvas.SetColor(color);
+                canvas.FillRect(x + 2, y + 2, Math.Max(1, fill), 3);
+                DrawShadowText(label, x + width + 6, y + 6, color, GameModel.Dark, FontTiny);
             }
 
-            int fill = (int)Math.Round((width - 4) * player.SpeedTime / 5.0);
-            canvas.SetColor(GameModel.Dark);
-            canvas.FillRect(x, y, width, 7);
-            canvas.SetColor(accent);
-            canvas.FillRect(x + 2, y + 2, Math.Max(1, fill), 3);
-            DrawShadowText("SPEED", x + width + 6, y + 6, GameModel.Cyan, GameModel.Dark, FontTiny);
+            return y - 10;
         }
 
         /// <summary>

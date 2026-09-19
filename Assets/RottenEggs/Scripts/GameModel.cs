@@ -37,6 +37,17 @@ namespace RottenEggs
     }
 
     /// <summary>
+    /// The boss's attack cycle. It is airborne and raining feathers, on its
+    /// perch dropping bombs, or asleep — and only asleep can it be hit.
+    /// </summary>
+    public enum BossPhase
+    {
+        Fly,
+        Bomb,
+        Sleep
+    }
+
+    /// <summary>
     /// Which chicken clip is on screen. Looping states keep replaying while
     /// their condition still holds; the rest run through once and hold their
     /// final frame until their action happens again.
@@ -47,7 +58,9 @@ namespace RottenEggs
         Walking,
         Jumping,
         Damage,
-        Die
+        Die,
+        Fly,           // Boss: airborne while the feather attack winds up
+        Sleeping       // Boss: dozing, the only time it can be hit
     }
 
     public enum EventType
@@ -70,13 +83,19 @@ namespace RottenEggs
             AnimState.Walking,
             AnimState.Jumping,
             AnimState.Damage,
-            AnimState.Die
+            AnimState.Die,
+            AnimState.Fly,
+            AnimState.Sleeping
         };
 
-        /// <summary>Idle and walking repeat because their condition keeps being true.</summary>
+        /// <summary>
+        /// Idle, walking, flying and sleeping repeat because their condition
+        /// keeps being true; the rest run once and hold their last frame.
+        /// </summary>
         public static bool Loops(this AnimState state)
         {
-            return state == AnimState.Idle || state == AnimState.Walking;
+            return state == AnimState.Idle || state == AnimState.Walking
+                || state == AnimState.Fly || state == AnimState.Sleeping;
         }
     }
 
@@ -107,6 +126,50 @@ namespace RottenEggs
         /// <summary>Half-hearts each mode starts with. Single player gets five hearts.</summary>
         public const int SingleMaxLivesHalf = 10;
         public const int DuoMaxLivesHalf = 6;
+
+        /// <summary>
+        /// Basket speed in pixels per second. A lone player covers the whole
+        /// 480px arena, so single player moves faster than a duo player who
+        /// only has half of it; the boosted speeds keep the speed egg a clear
+        /// step up in both modes.
+        /// </summary>
+        public const double SingleMoveSpeed = 180;
+        public const double SingleBoostSpeed = 250;
+        public const double DuoMoveSpeed = 145;
+        public const double DuoBoostSpeed = 220;
+
+        /// <summary>Stage 2: how long a downed chicken stays off its perch.</summary>
+        public const double Stage2RespawnSeconds = 10.0;
+
+        // ── Boss fight ────────────────────────────────────────────────────────
+        // The boss cycles Fly → Bomb → Sleep and can only be hurt while asleep.
+        public const int BossHp = 8;
+        public const double BossFlySeconds = 8.0;
+        public const double BossBombSeconds = 8.0;
+        public const double BossSleepSeconds = 6.0;
+        public const double BossFirstAttackDelay = 1.2;   // lets each phase announce itself
+        public const double BossFlyLift = 34;             // px the boss rises above its perch
+        public const double BossFlySpeed = 70;            // px/s sweep while airborne
+        public const double BossLiftSpeed = 90;           // px/s take-off / landing
+
+        // Feather strike: a flock gathers over the player, dives, and bursts on the ground.
+        public const double FeatherStrikeInterval = 2.2;
+        public const double FeatherWindupSeconds = 0.5;
+        public const double FeatherPlungeSeconds = 0.35;
+        public const double FeatherImpactSeconds = 0.3;
+        public const double FeatherHoverY = 78;           // flock's centre while it winds up
+        public const double FeatherHitRadius = 26;
+
+        // Bomb: dropped on the lay frame of the jump, sits with a burning fuse, then blows.
+        public const double BombDropInterval = 2.4;
+        public const double BombDropFrameSeconds = 0.4;   // frame 5 of the 6-frame jump
+        public const double BombFallSpeed = 160;
+        public const double BombFuseSeconds = 1.0;        // 5 fuse frames at 0.2s
+        public const double BombExplodeSeconds = 0.6;     // 6 blast frames at 0.1s
+        public const double BombHurtWindow = 0.3;         // only the fireball frames hurt
+        public const double BombBlastRadius = 40;
+        public const int BombSize = 24;
+        public const int BlastSize = 48;
 
         /// <summary>Chicken artwork is drawn from its top-left, with the feet 40px down.</summary>
         public const double ChickenH = 40;
@@ -235,6 +298,27 @@ namespace RottenEggs
             /// <summary>For respawn: counts down until chicken reappears</summary>
             public double RespawnTimer;
 
+            // ── Boss only ─────────────────────────────────────────────────────
+            public BossPhase BossPhase = BossPhase.Fly;
+            public double BossPhaseTime;
+            public double BossAttackTimer;
+            /// <summary>Set when a jump has started and its bomb has not yet left the boss.</summary>
+            public bool BombPending;
+            /// <summary>How far above the perch the boss currently hovers; 0 on the ground.</summary>
+            public double FlyLift;
+
+            /// <summary>Where the top of the artwork is this frame, perch height minus lift.</summary>
+            public double DrawY
+            {
+                get { return Y - FlyLift; }
+            }
+
+            /// <summary>The boss drops its guard only while it sleeps.</summary>
+            public bool BossVulnerable
+            {
+                get { return IsBoss && Alive() && BossPhase == BossPhase.Sleep; }
+            }
+
             public Chicken(
                 int owner,
                 int lane,
@@ -308,9 +392,10 @@ namespace RottenEggs
 
             public Rect Bounds()
             {
-                // The boss is drawn at a larger scale, so its hit box grows with it.
+                // The boss is drawn at a larger scale, so its hit box grows with it,
+                // and it follows the boss into the air.
                 double size = IsBoss ? 54 : 36;
-                return new Rect((float)(CenterX - size / 2), (float)(Y + 4), (float)size, (float)size);
+                return new Rect((float)(CenterX - size / 2), (float)(DrawY + 4), (float)size, (float)size);
             }
 
             /// <summary>Starts a clip that runs once, optionally rooting the chicken.</summary>
@@ -444,6 +529,72 @@ namespace RottenEggs
         public readonly List<FallingEgg> FallingEggs = new List<FallingEgg>();
         public readonly List<Shot> Shots = new List<Shot>();
         public readonly List<CrackedEgg> CrackedEggs = new List<CrackedEgg>();
+        public readonly List<Bomb> Bombs = new List<Bomb>();
+        public readonly List<FeatherStrike> Feathers = new List<FeatherStrike>();
+
+        /// <summary>
+        /// A bomb the boss lets go of mid-jump. It falls, lands, burns its fuse,
+        /// then blows; the blast hurts a basket within <see cref="BombBlastRadius"/>
+        /// of its centre during the fireball frames, once.
+        /// </summary>
+        public sealed class Bomb
+        {
+            public double X;          // top-left of the 24x24 art
+            public double Y;
+            public bool Landed;
+            public double FuseTime;   // seconds since landing
+            public bool Exploded;
+            public double BlastTime;  // seconds since detonation
+            public bool Hurt;
+
+            public Bomb(double x, double y)
+            {
+                X = x;
+                Y = y;
+            }
+
+            public double CenterX
+            {
+                get { return X + BombSize / 2.0; }
+            }
+        }
+
+        /// <summary>
+        /// A flock of feathers the flying boss sends at the player. It gathers
+        /// over the basket's position at launch, dives, and bursts on the
+        /// ground; a basket still under it at impact is hurt, once.
+        /// </summary>
+        public sealed class FeatherStrike
+        {
+            public readonly double X;   // centre, fixed at launch
+            public double Time;
+            public bool Hurt;
+
+            public FeatherStrike(double x)
+            {
+                X = x;
+            }
+
+            public bool WindingUp
+            {
+                get { return Time < FeatherWindupSeconds; }
+            }
+
+            public bool Plunging
+            {
+                get { return Time >= FeatherWindupSeconds && Time < FeatherWindupSeconds + FeatherPlungeSeconds; }
+            }
+
+            public bool Impacting
+            {
+                get { return Time >= FeatherWindupSeconds + FeatherPlungeSeconds && !Finished; }
+            }
+
+            public bool Finished
+            {
+                get { return Time >= FeatherWindupSeconds + FeatherPlungeSeconds + FeatherImpactSeconds; }
+            }
+        }
         public readonly List<Particle> Particles = new List<Particle>();
         public readonly List<GameEvent> Events = new List<GameEvent>();
         public readonly double[] SpawnTimers = new double[2];
@@ -640,15 +791,18 @@ namespace RottenEggs
                 else if (CurrentStage == Stage.Stage2)
                 {
                     // Stage 2: the same three lanes, but a downed chicken climbs
-                    // back onto its perch after five seconds until the goal is met.
-                    Chickens.Add(new Chicken(0, 0, 98, 48, 48, 140, 0.86, 1, true, 5.0));
-                    Chickens.Add(new Chicken(0, 1, 240, 42, 194, 286, 1.05, -1, true, 5.0));
-                    Chickens.Add(new Chicken(0, 2, 382, 48, 340, 432, 0.94, 1, true, 5.0));
+                    // back onto its perch after a while until the goal is met.
+                    Chickens.Add(new Chicken(0, 0, 98, 48, 48, 140, 0.86, 1, true, Stage2RespawnSeconds));
+                    Chickens.Add(new Chicken(0, 1, 240, 42, 194, 286, 1.05, -1, true, Stage2RespawnSeconds));
+                    Chickens.Add(new Chicken(0, 2, 382, 48, 340, 432, 0.94, 1, true, Stage2RespawnSeconds));
                 }
                 else // BossStage
                 {
-                    // Boss Stage: one oversized boss, eight hits, slow heavy patrol.
-                    Chickens.Add(new Chicken(0, 0, 240, 64, 120, 340, 0.55, 1, false, 0.0, true));
+                    // Boss Stage: one oversized boss that cycles flight, bombs and
+                    // sleep, and only takes its eight hits while it sleeps.
+                    Chicken boss = new Chicken(0, 0, 240, 64, 120, 340, 0.55, 1, false, 0.0, true);
+                    Chickens.Add(boss);
+                    EnterBossPhase(boss, BossPhase.Fly);
                 }
             }
             else
@@ -663,6 +817,8 @@ namespace RottenEggs
             Shots.Clear();
             Particles.Clear();
             CrackedEggs.Clear();
+            Bombs.Clear();
+            Feathers.Clear();
             Events.Clear();
 
             ResetPlayer(Players[0], selectedMode);
@@ -746,6 +902,7 @@ namespace RottenEggs
             Elapsed += dt;
             UpdateEffectTimers(dt);
             UpdateChickens(dt);
+            UpdateBossHazards(dt);
             MovePlayer(Players[0], playerOneAxis, dt);
             if (Mode == Mode.Duo)
             {
@@ -834,11 +991,12 @@ namespace RottenEggs
                 player.FreezeTime = Math.Max(0, player.FreezeTime - dt);
                 player.ReverseTime = Math.Max(0, player.ReverseTime - dt);
                 player.SabotageTime = Math.Max(0, player.SabotageTime - dt);
+                player.SlowDownTimer = Math.Max(0, player.SlowDownTimer - dt);
                 player.FireCooldown = Math.Max(0, player.FireCooldown - dt);
             }
         }
 
-        private static void MovePlayer(PlayerState player, int rawAxis, double dt)
+        private void MovePlayer(PlayerState player, int rawAxis, double dt)
         {
             int axis = rawAxis;
             if (player.FreezeTime > 0)
@@ -850,7 +1008,11 @@ namespace RottenEggs
                 axis = -axis;
             }
 
-            double speed = player.SpeedTime > 0 ? 220 : 145;
+            // Single player has the full width to cover alone, so it moves faster
+            // at rest and the speed egg still lands as a clear step up from that.
+            double speed = Mode == Mode.Single
+                ? (player.SpeedTime > 0 ? SingleBoostSpeed : SingleMoveSpeed)
+                : (player.SpeedTime > 0 ? DuoBoostSpeed : DuoMoveSpeed);
             player.BasketX += axis * speed * dt;
             player.BasketX = Clamp(player.BasketX, player.ArenaMinX, player.ArenaMaxX);
         }
@@ -882,30 +1044,256 @@ namespace RottenEggs
                     continue;
                 }
 
-                chicken.StandTime = Math.Max(0, chicken.StandTime - dt);
-                if (chicken.StandTime <= 0)
+                if (chicken.IsBoss)
                 {
-                    chicken.CenterX += chicken.Direction * ChickenPatrolSpeed(chicken) * dt;
-                    if (chicken.CenterX < chicken.MinX)
-                    {
-                        chicken.CenterX = chicken.MinX + (chicken.MinX - chicken.CenterX);
-                        chicken.Direction = 1;
-                        chicken.StandTime = TurnPauseSeconds;
-                    }
-                    else if (chicken.CenterX > chicken.MaxX)
-                    {
-                        chicken.CenterX = chicken.MaxX - (chicken.CenterX - chicken.MaxX);
-                        chicken.Direction = -1;
-                        chicken.StandTime = TurnPauseSeconds;
-                    }
-
-                    chicken.Facing = chicken.Direction;
+                    UpdateBoss(chicken, dt);
+                    continue;
                 }
 
+                PatrolStep(chicken, dt, ChickenPatrolSpeed(chicken));
                 if (chicken.ActionTime <= 0)
                 {
                     chicken.Loop(chicken.StandTime > 0 ? AnimState.Idle : AnimState.Walking);
                 }
+            }
+        }
+
+        /// <summary>Walks a chicken along its lane, pausing briefly at each end.</summary>
+        private static void PatrolStep(Chicken chicken, double dt, double speed)
+        {
+            chicken.StandTime = Math.Max(0, chicken.StandTime - dt);
+            if (chicken.StandTime > 0)
+            {
+                return;
+            }
+
+            chicken.CenterX += chicken.Direction * speed * dt;
+            if (chicken.CenterX < chicken.MinX)
+            {
+                chicken.CenterX = chicken.MinX + (chicken.MinX - chicken.CenterX);
+                chicken.Direction = 1;
+                chicken.StandTime = TurnPauseSeconds;
+            }
+            else if (chicken.CenterX > chicken.MaxX)
+            {
+                chicken.CenterX = chicken.MaxX - (chicken.CenterX - chicken.MaxX);
+                chicken.Direction = -1;
+                chicken.StandTime = TurnPauseSeconds;
+            }
+
+            chicken.Facing = chicken.Direction;
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // Boss fight
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Runs the boss's Fly → Bomb → Sleep cycle. Flying, it sweeps its lane
+        /// in the air and sends feather strikes at the player; bombing, it
+        /// patrols the perch and drops a bomb on the lay frame of each jump;
+        /// asleep, it is still and can finally be hit.
+        /// </summary>
+        private void UpdateBoss(Chicken boss, double dt)
+        {
+            PlayerState player = Players[0];
+            boss.BossPhaseTime += dt;
+            boss.BossAttackTimer -= dt;
+
+            switch (boss.BossPhase)
+            {
+                case BossPhase.Fly:
+                {
+                    boss.FlyLift = Math.Min(BossFlyLift, boss.FlyLift + BossLiftSpeed * dt);
+                    PatrolStep(boss, dt, BossFlySpeed);
+                    if (boss.ActionTime <= 0)
+                    {
+                        boss.Loop(AnimState.Fly);
+                    }
+
+                    if (boss.BossAttackTimer <= 0)
+                    {
+                        Feathers.Add(new FeatherStrike(player.BasketX + BasketW / 2));
+                        boss.BossAttackTimer = FeatherStrikeInterval;
+                    }
+
+                    if (boss.BossPhaseTime >= BossFlySeconds)
+                    {
+                        EnterBossPhase(boss, BossPhase.Bomb);
+                    }
+
+                    break;
+                }
+
+                case BossPhase.Bomb:
+                {
+                    boss.FlyLift = Math.Max(0, boss.FlyLift - BossLiftSpeed * dt);
+                    PatrolStep(boss, dt, ChickenPatrolSpeed(boss));
+
+                    // Start a jump on the beat; the bomb leaves on the lay frame, so
+                    // the drop reads off the animation exactly as a laid egg does.
+                    if (boss.BossAttackTimer <= 0 && boss.ActionTime <= 0 && boss.FlyLift <= 0)
+                    {
+                        boss.PlayOnce(AnimState.Jumping, LayAnimSeconds, true);
+                        boss.BombPending = true;
+                        boss.BossAttackTimer = BombDropInterval;
+                    }
+
+                    if (boss.BombPending && boss.Anim == AnimState.Jumping && boss.AnimTime >= BombDropFrameSeconds)
+                    {
+                        boss.BombPending = false;
+                        Bombs.Add(new Bomb(boss.CenterX - BombSize / 2.0, boss.DrawY + 24));
+                    }
+
+                    if (boss.ActionTime <= 0)
+                    {
+                        boss.Loop(boss.StandTime > 0 ? AnimState.Idle : AnimState.Walking);
+                    }
+
+                    if (boss.BossPhaseTime >= BossBombSeconds)
+                    {
+                        EnterBossPhase(boss, BossPhase.Sleep);
+                    }
+
+                    break;
+                }
+
+                case BossPhase.Sleep:
+                {
+                    boss.FlyLift = Math.Max(0, boss.FlyLift - BossLiftSpeed * dt);
+                    // A hit flashes the damage clip over the sleep, then it dozes off again.
+                    if (boss.ActionTime <= 0)
+                    {
+                        boss.Loop(AnimState.Sleeping);
+                    }
+
+                    if (boss.BossPhaseTime >= BossSleepSeconds)
+                    {
+                        EnterBossPhase(boss, BossPhase.Fly);
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        private void EnterBossPhase(Chicken boss, BossPhase phase)
+        {
+            boss.BossPhase = phase;
+            boss.BossPhaseTime = 0;
+            boss.BossAttackTimer = BossFirstAttackDelay;
+            boss.BombPending = false;
+            boss.StandTime = 0;
+
+            switch (phase)
+            {
+                case BossPhase.Fly:
+                    SetStatus(Players[0], "IT TAKES FLIGHT!  WATCH ABOVE", 1.4);
+                    break;
+                case BossPhase.Bomb:
+                    SetStatus(Players[0], "BOMBS AWAY!  KEEP YOUR DISTANCE", 1.4);
+                    break;
+                case BossPhase.Sleep:
+                    SetStatus(Players[0], "IT'S ASLEEP  -  THROW NOW!", 1.4);
+                    break;
+            }
+        }
+
+        /// <summary>Advances every bomb and feather strike and applies their damage.</summary>
+        private void UpdateBossHazards(double dt)
+        {
+            PlayerState player = Players[0];
+            double basketCenter = player.BasketX + BasketW / 2;
+
+            for (int i = Bombs.Count - 1; i >= 0; i--)
+            {
+                Bomb bomb = Bombs[i];
+                if (!bomb.Landed)
+                {
+                    bomb.Y += BombFallSpeed * dt;
+                    if (bomb.Y + BombSize >= GroundY)
+                    {
+                        bomb.Y = GroundY - BombSize;
+                        bomb.Landed = true;
+                    }
+                }
+                else if (!bomb.Exploded)
+                {
+                    bomb.FuseTime += dt;
+                    if (bomb.FuseTime >= BombFuseSeconds)
+                    {
+                        bomb.Exploded = true;
+                        ShakeTime = 0.2;
+                    }
+                }
+                else
+                {
+                    bomb.BlastTime += dt;
+                    if (!bomb.Hurt && bomb.BlastTime < BombHurtWindow
+                        && Math.Abs(bomb.CenterX - basketCenter) < BombBlastRadius)
+                    {
+                        bomb.Hurt = true;
+                        HurtPlayer(player, "BOOM!  -1/2 HEART");
+                    }
+
+                    if (bomb.BlastTime >= BombExplodeSeconds)
+                    {
+                        Bombs.RemoveAt(i);
+                    }
+                }
+            }
+
+            for (int i = Feathers.Count - 1; i >= 0; i--)
+            {
+                FeatherStrike strike = Feathers[i];
+                strike.Time += dt;
+                if (!strike.Hurt && strike.Impacting && Math.Abs(strike.X - basketCenter) < FeatherHitRadius)
+                {
+                    strike.Hurt = true;
+                    HurtPlayer(player, "FEATHERED!  -1/2 HEART");
+                }
+
+                if (strike.Finished)
+                {
+                    Feathers.RemoveAt(i);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Takes half a heart from a player, or a shield if they have one. Shared
+        /// by missed eggs and the boss's attacks so every hit is judged alike.
+        /// </summary>
+        private void HurtPlayer(PlayerState target, string hitText)
+        {
+            ShakeTime = Math.Max(ShakeTime, 0.12);
+
+            if (target.ShieldCount > 0)
+            {
+                target.ShieldCount--;
+                SetStatus(target, "SHIELD BLOCKED!", 1.0);
+                SpawnParticles(target.BasketX + BasketW / 2, BasketY, Cyan, 16, 100);
+                Emit(EventType.Power, target.Index);
+                return;
+            }
+
+            target.LivesHalf--;
+            target.Combo = 0;
+            if (target.LivesHalf < 0)
+            {
+                target.LivesHalf = 0;
+            }
+
+            SetStatus(target, hitText, 1.0);
+
+            if (Mode == Mode.Single && target.LivesHalf == 0)
+            {
+                Phase = Phase.Lost;
+                Emit(EventType.Lose, 0);
+            }
+            else
+            {
+                Emit(EventType.Miss, target.Index);
             }
         }
 
@@ -986,7 +1374,9 @@ namespace RottenEggs
             List<Chicken> alive = new List<Chicken>();
             foreach (Chicken chicken in Chickens)
             {
-                if (chicken.Alive())
+                // A sleeping boss lays nothing; the player's window to hit it is
+                // also their window to throw what they have banked.
+                if (chicken.Alive() && !chicken.BossVulnerable)
                 {
                     alive.Add(chicken);
                 }
@@ -1024,10 +1414,15 @@ namespace RottenEggs
                 LastPowerSpawnP0 = Elapsed;
             }
 
-            source.PlayOnce(AnimState.Jumping, LayAnimSeconds, true);
+            // A flying boss simply lets the egg go; a jump in mid-air would look wrong.
+            if (!(source.IsBoss && source.BossPhase == BossPhase.Fly))
+            {
+                source.PlayOnce(AnimState.Jumping, LayAnimSeconds, true);
+            }
+
             double jitter = -8 + Random.NextDouble() * 16;
             FallingEggs.Add(new FallingEgg(kind, 0, source.Lane,
-                source.CenterX - EggW / 2 + jitter, source.Y + 25));
+                source.CenterX - EggW / 2 + jitter, source.DrawY + 25));
         }
 
         public void SpawnDuoEgg(int owner)
@@ -1201,6 +1596,8 @@ namespace RottenEggs
             {
                 FallingEggs.Clear();
                 Shots.Clear();
+                Bombs.Clear();
+                Feathers.Clear();
             }
         }
 
@@ -1305,34 +1702,7 @@ namespace RottenEggs
                 return;
             }
 
-            // Shield absorbs one hit
-            if (target.ShieldCount > 0)
-            {
-                target.ShieldCount--;
-                SetStatus(target, "SHIELD BLOCKED!", 1.0);
-                SpawnParticles(target.BasketX + GameModel.BasketW / 2, GameModel.BasketY, Cyan, 16, 100);
-                Emit(EventType.Power, target.Index);
-                return;
-            }
-
-            target.LivesHalf--;
-            target.Combo = 0;
-            if (target.LivesHalf < 0)
-            {
-                target.LivesHalf = 0;
-            }
-
-            SetStatus(target, "CRACK!  -1/2 HEART", 1.0);
-
-            if (Mode == Mode.Single && target.LivesHalf == 0)
-            {
-                Phase = Phase.Lost;
-                Emit(EventType.Lose, 0);
-            }
-            else
-            {
-                Emit(EventType.Miss, target.Index);
-            }
+            HurtPlayer(target, "CRACK!  -1/2 HEART");
         }
 
         private void ResolveDuoResult()
@@ -1377,13 +1747,25 @@ namespace RottenEggs
                 shot.Age += dt;
                 shot.Y -= 220 * dt;
                 Chicken hitChicken = null;
+                Chicken shruggedBy = null;
                 foreach (Chicken chicken in Chickens)
                 {
-                    if (chicken.Alive() && shot.Bounds().Overlaps(chicken.Bounds()))
+                    if (!chicken.Alive() || !shot.Bounds().Overlaps(chicken.Bounds()))
+                    {
+                        continue;
+                    }
+
+                    // An awake boss is armoured: the egg breaks on it and does nothing.
+                    if (chicken.IsBoss && !chicken.BossVulnerable)
+                    {
+                        shruggedBy = chicken;
+                    }
+                    else
                     {
                         hitChicken = chicken;
-                        break;
                     }
+
+                    break;
                 }
 
                 if (hitChicken != null)
@@ -1394,6 +1776,12 @@ namespace RottenEggs
                     {
                         break;
                     }
+                }
+                else if (shruggedBy != null)
+                {
+                    SpawnParticles(shot.X + EggW / 2, shot.Y + EggH / 2, Cream, 6, 60);
+                    SetStatus(Players[0], "NO EFFECT  -  WAIT FOR IT TO SLEEP", 0.9);
+                    Shots.RemoveAt(index);
                 }
                 else if (shot.Y + EggH < 0)
                 {
@@ -1411,6 +1799,8 @@ namespace RottenEggs
             {
                 FallingEggs.Clear();
                 Shots.Clear();
+                Bombs.Clear();
+                Feathers.Clear();
             }
         }
 
