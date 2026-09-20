@@ -91,7 +91,8 @@ namespace RottenEggs
                 return;
             }
 
-            GamepadControls.Frame pad = controller.Read(model.Phase == Phase.Menu || paused);
+            // Vertical stick/d-pad navigates the menus, and in Duo picks a banked power egg.
+            GamepadControls.Frame pad = controller.Read(model.Phase == Phase.Menu || paused || model.Mode == Mode.Duo);
             double dt = Time.deltaTime;
             Tick(dt, pad);
             menuClock += Time.unscaledDeltaTime;
@@ -113,7 +114,20 @@ namespace RottenEggs
                     p1Axis = ClampAxis(p1Axis + p2Axis);
                     p2Axis = 0;
                 }
-                if (Pressed(GameKey.Space) || pad.Fire) model.Fire(0);
+                if (model.Mode == Mode.Duo)
+                {
+                    // Banked power eggs: pick with W/S (or the stick) and up/down, use with Space / Right Shift.
+                    int pickOne = pad.Navigate + (Pressed(GameKey.S) ? 1 : 0) - (Pressed(GameKey.W) ? 1 : 0);
+                    int pickTwo = (Pressed(GameKey.Down) ? 1 : 0) - (Pressed(GameKey.Up) ? 1 : 0);
+                    if (pickOne != 0) model.CycleSlot(0, ClampAxis(pickOne));
+                    if (pickTwo != 0) model.CycleSlot(1, pickTwo);
+                    if (Pressed(GameKey.Space) || pad.Fire) model.Deploy(0);
+                    if (Pressed(GameKey.RightShift)) model.Deploy(1);
+                }
+                else if (Pressed(GameKey.Space) || pad.Fire)
+                {
+                    model.Fire(0);
+                }
                 model.Update(dt, p1Axis, p2Axis);
             }
             PlayModelEvents();
@@ -441,6 +455,7 @@ namespace RottenEggs
             Minus,
             Equals,
             NumpadMinus,
+            RightShift,   // player two's use-power-up key in Duo
             NumpadPlus
         }
 
@@ -468,6 +483,7 @@ namespace RottenEggs
                 case GameKey.Minus: return Key.Minus;
                 case GameKey.Equals: return Key.Equals;
                 case GameKey.NumpadMinus: return Key.NumpadMinus;
+                case GameKey.RightShift: return Key.RightShift;
                 default: return Key.NumpadPlus;
             }
         }
@@ -518,6 +534,7 @@ namespace RottenEggs
                 case GameKey.Minus: return KeyCode.Minus;
                 case GameKey.Equals: return KeyCode.Equals;
                 case GameKey.NumpadMinus: return KeyCode.KeypadMinus;
+                case GameKey.RightShift: return KeyCode.RightShift;
                 default: return KeyCode.KeypadPlus;
             }
         }

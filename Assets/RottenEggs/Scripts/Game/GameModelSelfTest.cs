@@ -491,35 +491,91 @@ namespace RottenEggs
                 "missed Duo power eggs must be harmless");
             checks++;
 
+            // Duo power eggs are banked on catch and fire only when used.
             PlaceCatch(model, 0, EggKind.Speed);
             model.Update(0, 0, 0);
-            Require(Math.Abs(model.Player(0).SpeedTime - 4.0) < 1e-9 && model.Player(1).SpeedTime == 0,
-                "Duo speed must affect only the catcher");
-            checks++;
+            Require(model.Player(0).SpeedTime == 0
+                    && model.Player(0).Slots.Count == 1 && model.Player(0).Slots[0] == EggKind.Speed,
+                "a Duo power catch must bank the egg instead of firing it");
+            model.Deploy(0);
+            Require(Math.Abs(model.Player(0).SpeedTime - 4.0) < 1e-9 && model.Player(1).SpeedTime == 0
+                    && model.Player(0).Slots.Count == 0,
+                "using a banked speed egg must boost only the user and empty the slot");
+            checks += 2;
 
             PlaceCatch(model, 0, EggKind.Freeze);
             model.Update(0, 0, 0);
+            double freeX = model.Player(1).BasketX;
+            model.Update(0.05, 0, 1);
+            Require(model.Player(1).BasketX > freeX, "a banked freeze must not touch the opponent until used");
+            model.Deploy(0);
             double frozenX = model.Player(1).BasketX;
             model.Update(0.05, 0, 1);
-            Require(model.Player(1).BasketX == frozenX, "freeze must stop the opponent's movement");
-            checks++;
+            Require(model.Player(1).BasketX == frozenX, "a used freeze must stop the opponent's movement");
+            checks += 2;
 
             model.Player(1).FreezeTime = 0;
             PlaceCatch(model, 0, EggKind.Reverse);
             model.Update(0, 0, 0);
+            model.Deploy(0);
             double reversedX = model.Player(1).BasketX;
             model.Update(0.05, 0, 1);
-            Require(model.Player(1).BasketX < reversedX, "reverse must invert the opponent's controls");
+            Require(model.Player(1).BasketX < reversedX, "a used reverse must invert the opponent's controls");
             checks++;
 
+            // Two slots: a third catch replaces the selected one; W/S moves the selection.
+            PlaceCatch(model, 0, EggKind.Golden);
+            model.Update(0, 0, 0);
+            PlaceCatch(model, 0, EggKind.Speed);
+            model.Update(0, 0, 0);
+            Require(model.Player(0).Slots.Count == 2 && model.Player(0).SelectedSlot == 1,
+                "the bank holds two eggs and selects the newest");
+            model.CycleSlot(0, -1);
+            Require(model.Player(0).SelectedSlot == 0, "cycling must move the selection");
+            PlaceCatch(model, 0, EggKind.Freeze);
+            model.Update(0, 0, 0);
+            Require(model.Player(0).Slots.Count == 2 && model.Player(0).Slots[0] == EggKind.Freeze
+                    && model.Player(0).Slots[1] == EggKind.Speed,
+                "a catch with a full bank must replace the selected slot");
+            checks += 3;
+
+            model.Player(0).Slots.Clear();
             model.Player(1).Combo = 6;
             PlaceCatch(model, 0, EggKind.Golden);
             model.Update(0, 0, 0);
+            model.Deploy(0);
             GameModel.FallingEgg opponentEgg = new GameModel.FallingEgg(EggKind.Normal, 1, 0, 300, 100);
             Require(Math.Abs(model.Player(1).SabotageTime - 5.0) < 1e-9
                     && model.Player(1).Combo == 0
                     && model.FallSpeedFor(opponentEgg) > model.BaseFallSpeed(),
-                "golden eggs must speed up the opponent's drops and break their combo");
+                "a used golden egg must speed up the opponent's drops and break their combo");
+            checks++;
+
+            // Mirrored spawns: one clock, one roll, two reflected eggs.
+            GameModel mirror = new GameModel(new Random(11));
+            mirror.StartRound(Mode.Duo);
+            mirror.SpawnTimers[0] = 0;
+            mirror.Update(0.001, 0, 0);
+            Require(mirror.FallingEggs.Count == 2
+                    && mirror.FallingEggs[0].Owner == 0 && mirror.FallingEggs[1].Owner == 1
+                    && mirror.FallingEggs[0].Kind == mirror.FallingEggs[1].Kind
+                    && Math.Abs(mirror.FallingEggs[0].Y - mirror.FallingEggs[1].Y) < 1e-9
+                    && Math.Abs((mirror.FallingEggs[0].X + mirror.FallingEggs[1].X + GameModel.EggW) - GameModel.WorldW) < 1e-6,
+                "Duo must lay the same egg on both sides, reflected across the divider");
+            checks++;
+
+            // Sudden death: past the clock, eggs fall faster and keep ramping.
+            GameModel clock = new GameModel(new Random(5));
+            clock.StartRound(Mode.Duo);
+            clock.SpawnTimers[0] = 999;
+            double calm = clock.BaseFallSpeed();
+            clock.Elapsed = GameModel.DuoSuddenDeathSeconds - 0.01;
+            Require(!clock.SuddenDeath && clock.SuddenDeathIn > 0 && clock.SuddenDeathIn < 0.02, "the clock counts down to sudden death");
+            clock.Elapsed = GameModel.DuoSuddenDeathSeconds;
+            double onset = clock.BaseFallSpeed();
+            clock.Elapsed = GameModel.DuoSuddenDeathSeconds + 20;
+            Require(clock.SuddenDeath && onset > calm && clock.BaseFallSpeed() > onset,
+                "sudden death must speed the drops up and keep ramping");
             checks++;
 
             GameModel duoWin = new GameModel(new Random(17));

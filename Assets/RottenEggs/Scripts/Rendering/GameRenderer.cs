@@ -1081,6 +1081,11 @@ namespace RottenEggs
             DrawShadowText("2UP", 455,  9, GameModel.Gold, Black, FontTiny);
             // ─────────────────────────────────────────────────────────────────
 
+            // Banked power eggs, mirrored either side of the centre readout.
+            DrawPowerSlots(one, 147, GameModel.Cyan);
+            DrawPowerSlots(two, 303, GameModel.Pink);
+            DrawSuddenDeath(model);
+
             if (one.StatusTimer > 0 && model.Phase == Phase.Playing)
             {
                 DrawCenteredText(one.StatusText, 120, 194, White, GameModel.Dark, FontTiny);
@@ -1093,7 +1098,64 @@ namespace RottenEggs
 
             DrawEffectLabel(one, 120, 207, GameModel.Cyan);
             DrawEffectLabel(two, 360, 207, GameModel.Pink);
-            DrawFooter(controllerHints ? "P1 STICK/D-PAD • P2 ARROWS • START PAUSE" : "P1 A/D • P2 ARROWS • P PAUSE • ESC MENU");
+            DrawFooter(controllerHints
+                ? "P1 STICK • UP/DOWN PICK • B USE  •  P2 ARROWS • RSHIFT USE  •  START PAUSE"
+                : "P1 A/D • W/S PICK • SPACE USE  •  P2 ARROWS • RSHIFT USE  •  P PAUSE");
+        }
+
+        /// <summary>
+        /// A Duo player's two power-egg slots: the egg art itself at 1:1 (the
+        /// player has been catching these, so no new icon is needed), a faint
+        /// outline for an empty slot, and an accent bar under the selected one.
+        /// </summary>
+        private void DrawPowerSlots(GameModel.PlayerState player, int x, Color32 accent)
+        {
+            const int pitch = 16;
+            const int y = 8;
+            for (int i = 0; i < GameModel.DuoSlotCount; i++)
+            {
+                int sx = x + i * pitch;
+                if (i < player.Slots.Count)
+                {
+                    DrawEgg(sx, y, player.Slots[i], false);
+                }
+                else
+                {
+                    canvas.SetColor(White, 40);
+                    canvas.FillRect(sx, y, (int)GameModel.EggW, (int)GameModel.EggH);
+                    canvas.SetColor(GameModel.Dark);
+                    canvas.DrawPolygon(new[] { sx, sx + (int)GameModel.EggW - 1, sx + (int)GameModel.EggW - 1, sx },
+                                       new[] { y, y, y + (int)GameModel.EggH - 1, y + (int)GameModel.EggH - 1 }, 4);
+                }
+
+                if (player.Slots.Count > 0 && i == player.SelectedSlot)
+                {
+                    canvas.SetColor(accent);
+                    canvas.FillRect(sx, y + (int)GameModel.EggH + 1, (int)GameModel.EggW, 2);
+                }
+            }
+        }
+
+        /// <summary>The Duo clock: a countdown in the last ten seconds, then a blinking warning.</summary>
+        private void DrawSuddenDeath(GameModel model)
+        {
+            if (model.Phase != Phase.Playing)
+            {
+                return;
+            }
+
+            if (model.SuddenDeath)
+            {
+                if ((int)(_clock * 3.0) % 2 == 0)
+                {
+                    DrawCenteredText("SUDDEN DEATH", 240, 44, GameModel.Pink, Black, FontSmall);
+                }
+            }
+            else if (model.SuddenDeathIn <= 10.0)
+            {
+                DrawCenteredText("SUDDEN DEATH IN " + Mathf.CeilToInt((float)model.SuddenDeathIn),
+                                 240, 44, GameModel.Gold, Black, FontTiny);
+            }
         }
 
         private void DrawTopPanel()

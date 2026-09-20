@@ -148,6 +148,16 @@ namespace RottenEggs
         public const double DuoMoveSpeed = 145;
         public const double DuoBoostSpeed = 220;
 
+        // ── Duo ───────────────────────────────────────────────────────────────
+        // Power eggs are banked and used on a button rather than firing on catch,
+        // so the timing is the player's. Both sides get the same eggs at mirrored
+        // positions, and a clock ends stalemates.
+        public const int DuoSlotCount = 2;
+        public const double DuoSuddenDeathSeconds = 90;
+        public const double DuoSuddenDeathStart = 1.4;    // fall-speed multiplier the moment it begins
+        public const double DuoSuddenDeathRamp = 0.03;    // added per second after that
+        public const double DuoSuddenDeathMax = 2.5;
+
         /// <summary>Stage 2: how long a downed chicken stays off its perch.</summary>
         public const double Stage2RespawnSeconds = 10.0;
 
@@ -270,6 +280,8 @@ namespace RottenEggs
             public double StatusTimer;
             public string StatusText = "";
             public int ShieldCount;       // Number of shield power-ups
+            public readonly List<EggKind> Slots = new List<EggKind>();   // Duo: banked power eggs
+            public int SelectedSlot;      // Duo: which banked egg the use key fires
             public double SlowDownTimer;  // Slow-down power-up active timer
 
             public PlayerState(int index)
@@ -964,6 +976,8 @@ namespace RottenEggs
             player.StatusText = "";
             player.ShieldCount = 0;
             player.SlowDownTimer = 0;
+            player.Slots.Clear();
+            player.SelectedSlot = 0;
         }
 
         public void Update(double rawDt, int playerOneAxis, int playerTwoAxis)
@@ -989,7 +1003,15 @@ namespace RottenEggs
                 return;
             }
 
+            bool clockWasRunning = Mode == Mode.Duo && Elapsed < DuoSuddenDeathSeconds;
             Elapsed += dt;
+            if (clockWasRunning && SuddenDeath)
+            {
+                SetStatus(Players[0], "SUDDEN DEATH!", 1.6);
+                SetStatus(Players[1], "SUDDEN DEATH!", 1.6);
+                ShakeTime = 0.25;
+                Emit(EventType.Power, 0);
+            }
             UpdateEffectTimers(dt);
             UpdateChickens(dt);
             UpdateBossHazards(dt);
@@ -1601,15 +1623,71 @@ namespace RottenEggs
 
         private void UpdateDuoSpawning(double dt)
         {
-            for (int owner = 0; owner < 2; owner++)
+            // One clock and one roll for both sides: whatever falls for one
+            // player falls for the other at the mirrored spot at the same moment,
+            // so the only difference between the two halves is the people.
+            SpawnTimers[0] -= dt;
+            if (SpawnTimers[0] <= 0)
             {
-                SpawnTimers[owner] -= dt;
-                if (SpawnTimers[owner] <= 0)
+                SpawnMirroredDuoEggs();
+                SpawnTimers[0] = SpawnInterval() * (0.88 + Random.NextDouble() * 0.22);
+            }
+        }
+
+        /// <summary>
+        /// Lays the same egg on both sides. Player one's lane <c>L</c> mirrors
+        /// player two's lane <c>1 - L</c>, and the jitter flips sign, so the two
+        /// eggs are exact reflections of each other across the divider.
+        /// </summary>
+        private void SpawnMirroredDuoEggs()
+        {
+            int lane = Random.Next(2);
+            Chicken left = ChickenIn(0, lane);
+            Chicken right = ChickenIn(1, 1 - lane);
+            if (left == null && right == null)
+            {
+                return;
+            }
+
+            EggKind kind = EggKind.Normal;
+            if (Elapsed >= 6
+                && Elapsed - LastPowerSpawnP0 >= 5
+                && !PowerEggVisible(0) && !PowerEggVisible(1)
+                && Random.NextDouble() < 0.30)
+            {
+                double roll = Random.NextDouble();
+                kind = roll < 0.35 ? EggKind.Speed
+                     : roll < 0.60 ? EggKind.Freeze
+                     : roll < 0.82 ? EggKind.Reverse
+                     : EggKind.Golden;
+                LastPowerSpawnP0 = Elapsed;
+            }
+
+            double jitter = -7 + Random.NextDouble() * 14;
+            if (left != null)
+            {
+                left.PlayOnce(AnimState.Jumping, LayAnimSeconds, true);
+                FallingEggs.Add(new FallingEgg(kind, 0, left.Lane, left.CenterX - EggW / 2 + jitter, left.Y + 25));
+            }
+
+            if (right != null)
+            {
+                right.PlayOnce(AnimState.Jumping, LayAnimSeconds, true);
+                FallingEggs.Add(new FallingEgg(kind, 1, right.Lane, right.CenterX - EggW / 2 - jitter, right.Y + 25));
+            }
+        }
+
+        private Chicken ChickenIn(int owner, int lane)
+        {
+            foreach (Chicken chicken in Chickens)
+            {
+                if (chicken.Owner == owner && chicken.Lane == lane && chicken.Alive())
                 {
-                    SpawnDuoEgg(owner);
-                    SpawnTimers[owner] = SpawnInterval() * (0.88 + Random.NextDouble() * 0.22);
+                    return chicken;
                 }
             }
+
+            return null;
         }
 
         public void SpawnSingleEgg()
@@ -1739,7 +1817,31 @@ namespace RottenEggs
         public double BaseFallSpeed()
         {
             int tier = Math.Min(5, (int)(Elapsed / 20.0));
-            return ((Mode == Mode.Single ? 52 : 50) + tier * (Mode == Mode.Single ? 8 : 7)) * StagePace();
+            double speed = ((Mode == Mode.Single ? 52 : 50) + tier * (Mode == Mode.Single ? 8 : 7)) * StagePace();
+            return speed * SuddenDeathFactor();
+        }
+
+        /// <summary>True once a Duo match has run past its clock.</summary>
+        public bool SuddenDeath
+        {
+            get { return Mode == Mode.Duo && Phase != Phase.Menu && Elapsed >= DuoSuddenDeathSeconds; }
+        }
+
+        /// <summary>Seconds until sudden death; zero once it has begun.</summary>
+        public double SuddenDeathIn
+        {
+            get { return Math.Max(0, DuoSuddenDeathSeconds - Elapsed); }
+        }
+
+        /// <summary>Duo only: eggs fall harder and harder past the clock so someone breaks.</summary>
+        public double SuddenDeathFactor()
+        {
+            if (!SuddenDeath)
+            {
+                return 1.0;
+            }
+
+            return Math.Min(DuoSuddenDeathMax, DuoSuddenDeathStart + (Elapsed - DuoSuddenDeathSeconds) * DuoSuddenDeathRamp);
         }
 
         /// <summary>
@@ -1866,49 +1968,25 @@ namespace RottenEggs
                 }
 
                 case EggKind.Speed:
-                {
-                    catcher.SpeedTime = Mode == Mode.Single ? 5.0 : 4.0;
-                    points = AddComboScore(catcher, 25);
-                    SetStatus(catcher, "SPEED UP!  +" + points, 1.1);
-                    SpawnParticles(egg.X, egg.Y, Cyan, 9, 76);
-                    Emit(EventType.Power, catcher.Index);
-                    break;
-                }
-
                 case EggKind.Freeze:
-                {
-                    PlayerState opponent = Players[1 - catcher.Index];
-                    opponent.FreezeTime = 2.0;
-                    points = AddComboScore(catcher, 30);
-                    SetStatus(catcher, "FREEZE!  +" + points, 1.0);
-                    SetStatus(opponent, "FROZEN", 1.0);
-                    SpawnParticles(egg.X, egg.Y, Ice, 10, 78);
-                    Emit(EventType.Power, catcher.Index);
-                    break;
-                }
-
                 case EggKind.Reverse:
-                {
-                    PlayerState opponent = Players[1 - catcher.Index];
-                    opponent.ReverseTime = 3.0;
-                    points = AddComboScore(catcher, 30);
-                    SetStatus(catcher, "REVERSE!  +" + points, 1.0);
-                    SetStatus(opponent, "CONTROLS REVERSED", 1.1);
-                    SpawnParticles(egg.X, egg.Y, Purple, 10, 78);
-                    Emit(EventType.Power, catcher.Index);
-                    break;
-                }
-
                 case EggKind.Golden:
                 {
-                    PlayerState opponent = Players[1 - catcher.Index];
-                    opponent.SabotageTime = 5.0;
-                    opponent.Combo = 0;
-                    points = AddComboScore(catcher, 50);
-                    SetStatus(catcher, "GOLD RUSH!  +" + points, 1.0);
-                    SetStatus(opponent, "EGG STORM!", 1.1);
-                    SpawnParticles(egg.X, egg.Y, Gold, 14, 90);
+                    points = AddComboScore(catcher, PowerPoints(egg.Kind));
+                    SpawnParticles(egg.X, egg.Y, ColorFor(egg.Kind), 10, 80);
                     Emit(EventType.Power, catcher.Index);
+                    if (Mode == Mode.Duo)
+                    {
+                        // Banked, not fired: the player picks the moment.
+                        BankPower(catcher, egg.Kind);
+                        SetStatus(catcher, PowerName(egg.Kind) + " READY  +" + points, 1.0);
+                    }
+                    else
+                    {
+                        ApplyPower(egg.Kind, catcher);
+                        SetStatus(catcher, PowerShout(egg.Kind) + "  +" + points, 1.0);
+                    }
+
                     break;
                 }
 
@@ -1931,6 +2009,108 @@ namespace RottenEggs
                     Emit(EventType.Power, catcher.Index);
                     break;
                 }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // Duo power-ups
+        // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>Puts a caught power egg in a slot; a full bank swaps out the selected one.</summary>
+        private static void BankPower(PlayerState player, EggKind kind)
+        {
+            if (player.Slots.Count < DuoSlotCount)
+            {
+                player.Slots.Add(kind);
+                player.SelectedSlot = player.Slots.Count - 1;
+            }
+            else
+            {
+                player.Slots[player.SelectedSlot] = kind;
+            }
+        }
+
+        /// <summary>Moves a Duo player's selection through their banked eggs.</summary>
+        public void CycleSlot(int playerIndex, int direction)
+        {
+            if (Phase != Phase.Playing || Mode != Mode.Duo)
+            {
+                return;
+            }
+
+            PlayerState player = Players[playerIndex];
+            if (player.Slots.Count > 1)
+            {
+                player.SelectedSlot = ((player.SelectedSlot + direction) % player.Slots.Count + player.Slots.Count) % player.Slots.Count;
+            }
+        }
+
+        /// <summary>Fires a Duo player's selected banked egg right now.</summary>
+        public void Deploy(int playerIndex)
+        {
+            if (Phase != Phase.Playing || Mode != Mode.Duo)
+            {
+                return;
+            }
+
+            PlayerState player = Players[playerIndex];
+            if (player.Slots.Count == 0)
+            {
+                return;
+            }
+
+            EggKind kind = player.Slots[player.SelectedSlot];
+            player.Slots.RemoveAt(player.SelectedSlot);
+            player.SelectedSlot = Math.Min(player.SelectedSlot, Math.Max(0, player.Slots.Count - 1));
+            ApplyPower(kind, player);
+            SetStatus(player, PowerShout(kind), 1.0);
+            SpawnParticles(player.BasketX + BasketW / 2, BasketRimY, ColorFor(kind), 12, 85);
+            Emit(EventType.Power, playerIndex);
+        }
+
+        /// <summary>The effect of a power egg, whoever triggers it and whenever.</summary>
+        private void ApplyPower(EggKind kind, PlayerState user)
+        {
+            PlayerState opponent = Players[1 - user.Index];
+            switch (kind)
+            {
+                case EggKind.Speed:
+                    user.SpeedTime = Mode == Mode.Single ? 5.0 : 4.0;
+                    break;
+                case EggKind.Freeze:
+                    opponent.FreezeTime = 2.0;
+                    SetStatus(opponent, "FROZEN", 1.0);
+                    break;
+                case EggKind.Reverse:
+                    opponent.ReverseTime = 3.0;
+                    SetStatus(opponent, "CONTROLS REVERSED", 1.1);
+                    break;
+                case EggKind.Golden:
+                    opponent.SabotageTime = 5.0;
+                    opponent.Combo = 0;
+                    SetStatus(opponent, "EGG STORM!", 1.1);
+                    break;
+            }
+        }
+
+        private static int PowerPoints(EggKind kind)
+        {
+            return kind == EggKind.Golden ? 50 : kind == EggKind.Speed ? 25 : 30;
+        }
+
+        private static string PowerName(EggKind kind)
+        {
+            return kind == EggKind.Golden ? "GOLD" : kind.ToString().ToUpperInvariant();
+        }
+
+        private static string PowerShout(EggKind kind)
+        {
+            switch (kind)
+            {
+                case EggKind.Speed: return "SPEED UP!";
+                case EggKind.Freeze: return "FREEZE!";
+                case EggKind.Reverse: return "REVERSE!";
+                default: return "GOLD RUSH!";
             }
         }
 
