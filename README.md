@@ -18,11 +18,21 @@ every one of them:
 | Stage | The job |
 |---|---|
 | Stage 1 — Classic | Knock down all three chickens |
-| Stage 2 — Respawn | Knock down six; a downed chicken climbs back up five seconds later |
-| Boss stage | One oversized boss with eight hits |
+| Stage 2 — Respawn | Knock down six; a downed chicken climbs back up ten seconds later |
+| Boss stage | One oversized boss that only takes hits while it sleeps — see below |
 
 Hearts, ammo, score and shields carry over between stages, so a clear reads as
 progress rather than a fresh start, and every stage ramps faster than the last.
+
+**The boss** cycles through three phases and is only vulnerable in the last:
+
+| Phase | What happens | What you do |
+|---|---|---|
+| Flight | It chases your basket, stalls overhead, and drops a wave of feathers | Keep moving — a feather that lands on you costs half a heart |
+| Bombs | Back on its perch, it drops a bomb on every jump; the fuse flashes red before it blows | Get clear of the blast |
+| Sleep | It dozes off. Eggs thrown now land | Throw what you banked — two hits wake it, so make them count |
+
+Eggs thrown at it while awake bounce off. It takes eight hits in total.
 
 Single-player power eggs:
 
@@ -33,18 +43,26 @@ Single-player power eggs:
 | Slow down | Halves the falling speed of every egg for 5 seconds |
 | Golden | 50 points before the combo multiplier |
 
-**Duo mode** — Two baskets, two players, one screen. You can't hit each other
-directly, so the game is about outlasting the other player and making their
-life difficult along the way. Some eggs are sabotage:
+**Duo mode** — Two baskets, two players, one screen. Both sides get exactly
+the same eggs at the same moment, mirrored across the divider, so the only
+difference between the two halves is the people. You can't hit each other
+directly; you outlast the other player and make their life difficult along
+the way.
 
-| Egg | What it does |
+Power eggs aren't used the moment you catch them. They go into two slots, and
+you pick when to fire them — freeze the other player as a cluster is about to
+land on them, or hold your speed for the wave you can see coming. Catching a
+third egg with both slots full replaces the one you have selected.
+
+| Egg | What it does when used |
 |---|---|
 | Speed | Gives you a burst of speed |
 | Freeze | Locks the other player in place for 2 seconds |
 | Reverse | Flips the other player's controls for 3 seconds |
 | Golden | Makes the other player's eggs fall faster for 5 seconds |
 
-Last basket standing wins.
+At **90 seconds** the match goes to sudden death: eggs fall faster and keep
+speeding up until someone breaks. Last basket standing wins.
 
 Catch ten in a row in either mode and you hit **Fever** — triple points until
 you miss.
@@ -55,12 +73,15 @@ you miss.
 |---|---|
 | Menu | `W`/`S` or `↑`/`↓` to choose · `Enter` to start · `1`/`2` to jump straight in |
 | Single | `A`/`D` to move · `Space` to throw · `R` restart · `Esc` back to menu |
-| Duo | Player 1 `A`/`D` · Player 2 `←`/`→` · `R` restart · `Esc` back to menu |
+| Duo — player 1 | `A`/`D` move · `W`/`S` pick a banked egg · `Space` use it |
+| Duo — player 2 | `←`/`→` move · `↑`/`↓` pick a banked egg · `Right Shift` use it |
+| Duo — both | `R` restart · `Esc` back to menu |
 | Audio | `M` mute · `-`/`+` volume |
 | Pause | `P` pause/resume · `W`/`S` or `↑`/`↓` select · `Enter` confirm · `Esc` resume |
 
-**Controller (player 1)** — Left stick or D-pad moves and selects menu items.
-South (`A` / Cross) confirms; east (`B` / Circle) throws during play, resumes
+**Controller (player 1)** — Left stick or D-pad moves and selects menu items;
+in Duo, up/down on either picks a banked egg. South (`A` / Cross) confirms;
+east (`B` / Circle) throws in single player, uses the banked egg in Duo, resumes
 from pause, and returns to the menu from results. Start pauses/resumes, west
 (`X` / Square) restarts, Select/View/Share toggles mute, and the left/right
 bumpers lower/raise volume. The pause menu offers Resume, Restart, Main Menu,
