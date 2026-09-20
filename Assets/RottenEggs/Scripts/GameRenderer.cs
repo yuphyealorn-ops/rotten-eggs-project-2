@@ -744,185 +744,142 @@ namespace RottenEggs
         }
 
         /// <summary>
-        /// A 24×24 bomb: the fuse burns down over five frames once it has landed.
-        /// Drawn flat while still falling.
+        /// The bomb on its 14×18 egg rect: the falling wobble while it drops and
+        /// sits, then the red armed flash for the last half second of the fuse.
         /// </summary>
         private void DrawBomb(GameModel.Bomb bomb)
         {
             int x = (int)Math.Round(bomb.X);
             int y = (int)Math.Round(bomb.Y);
-            int size = GameModel.BombSize;
-            double fuse = bomb.Landed ? bomb.FuseTime / GameModel.BombFuseSeconds : 0;
+            int w = GameModel.BombW;
+            int h = GameModel.BombH;
 
-            if (bossArt != null && bossArt.Bomb != null)
+            if (bossArt != null && bossArt.BombFall != null && bossArt.BombArmed != null)
             {
-                canvas.DrawSprite(BossSprites.FrameFor(bossArt.Bomb, bomb.FuseTime, GameModel.BombFuseSeconds),
-                                  x, y, x + size, y + size);
+                SpriteFrame frame = bomb.Armed
+                    ? BossSprites.Loop(bossArt.BombArmed, bomb.FuseTime, BossSprites.BombArmedFps)
+                    : BossSprites.Loop(bossArt.BombFall, bomb.Age, BossSprites.BombFallFps);
+                canvas.DrawSprite(frame, x, y, x + w, y + h);
                 return;
             }
 
-            // Body: dark ball with a highlight, flushing red as the fuse runs out.
-            bool aboutToBlow = fuse > 0.7 && (int)(_clock * 12.0) % 2 == 0;
-            canvas.SetColor(aboutToBlow ? new Color32(140, 40, 40, 255) : new Color32(30, 32, 40, 255));
-            canvas.FillOval(x + 3, y + 7, 18, 16);
-            canvas.SetColor(GameModel.Dark);
-            canvas.DrawArc(x + 3, y + 7, 18, 16, 0, 360, 1);
-            canvas.SetColor(90, 96, 110);
-            canvas.FillOval(x + 7, y + 10, 5, 4);
-
-            // Fuse: a short stub that shrinks with the burn, tipped with a spark.
-            int fuseLength = (int)Math.Round(6 * (1.0 - fuse));
+            // Placeholder: dark ball, fuse stub, spark; flushes red once armed.
+            bool flash = bomb.Armed && (int)(bomb.FuseTime * BossSprites.BombArmedFps) % 2 == 0;
+            canvas.SetColor(flash ? new Color32(172, 50, 50, 255) : new Color32(50, 60, 57, 255));
+            canvas.FillOval(x + 1, y + 6, 12, 12);
             canvas.SetColor(WoodDark);
-            for (int i = 0; i <= fuseLength; i++)
-            {
-                canvas.FillRect(x + 12 + i, y + 7 - i, 2, 2);
-            }
-
-            if (bomb.Landed)
-            {
-                int sparkX = x + 12 + fuseLength;
-                int sparkY = y + 7 - fuseLength;
-                canvas.SetColor((int)(_clock * 20.0) % 2 == 0 ? GameModel.Gold : White);
-                canvas.FillRect(sparkX - 1, sparkY - 1, 4, 4);
-            }
+            canvas.FillRect(x + 7, y + 3, 2, 4);
+            canvas.SetColor((int)(bomb.Age * 20.0) % 2 == 0 ? GameModel.Gold : White);
+            canvas.FillRect(x + 7, y + 1, 2, 2);
         }
 
         /// <summary>
-        /// A 48×48 blast centred on the bomb: a fireball that swells and cools
-        /// into smoke over six frames.
+        /// The 32×32 blast, centred on the bomb: fireball, collapse, then dithered
+        /// smoke that thins itself out — no fade needed.
         /// </summary>
         private void DrawExplosion(GameModel.Bomb bomb)
         {
             int cx = (int)Math.Round(bomb.CenterX);
-            int cy = (int)Math.Round(bomb.Y + GameModel.BombSize / 2.0);
+            int cy = (int)Math.Round(bomb.CenterY);
             int size = GameModel.BlastSize;
             int x = cx - size / 2;
             int y = cy - size / 2;
 
             if (bossArt != null && bossArt.Explosion != null)
             {
-                canvas.DrawSprite(BossSprites.FrameFor(bossArt.Explosion, bomb.BlastTime, GameModel.BombExplodeSeconds),
+                canvas.DrawSprite(BossSprites.Once(bossArt.Explosion, bomb.BlastTime, GameModel.BombExplodeSeconds),
                                   x, y, x + size, y + size);
                 return;
             }
 
             double t = Math.Min(1.0, bomb.BlastTime / GameModel.BombExplodeSeconds);
-            int radius = (int)Math.Round(6 + 18 * Math.Min(1.0, t * 2.0));
+            int radius = (int)Math.Round(4 + 12 * Math.Min(1.0, t * 2.0));
             byte alpha = (byte)(255 * (t < 0.5 ? 1.0 : 1.0 - (t - 0.5) * 2.0));
             Color32 fill = t < 0.25 ? GameModel.Gold
                          : t < 0.5  ? new Color32(255, 140, 40, 255)
                          : new Color32(120, 116, 112, 255);
             canvas.SetColor(fill, alpha);
             canvas.FillOval(cx - radius, cy - radius, radius * 2, radius * 2);
-            if (t < 0.5)
-            {
-                canvas.SetColor(White, alpha);
-                canvas.FillOval(cx - radius / 2, cy - radius / 2, radius, radius);
-            }
         }
 
         /// <summary>
-        /// A 48×48 feather flock. It gathers over the target, dives to the
-        /// basket row, and bursts; a dotted line marks the landing spot while
-        /// it winds up so the player has a fair chance to move.
+        /// A feather wave. While the boss hovers, the warning sits under it with
+        /// a dotted line to the ground; once released, each feather tumbles
+        /// down on its own flutter phase and bursts where it lands.
         /// </summary>
         private void DrawFeatherStrike(GameModel.FeatherStrike strike)
         {
             int cx = (int)Math.Round(strike.X);
-            int size = GameModel.BlastSize;
-            int groundY = (int)GameModel.BasketRimY;
-            double hoverY = GameModel.FeatherHoverY;
+            int startY = (int)Math.Round(strike.StartY);
 
-            // Where the flock's centre is this frame.
-            double centreY;
             if (strike.WindingUp)
             {
-                centreY = hoverY;
-            }
-            else if (strike.Plunging)
-            {
-                double p = (strike.Time - GameModel.FeatherWindupSeconds) / GameModel.FeatherPlungeSeconds;
-                centreY = hoverY + (groundY - hoverY) * p;
-            }
-            else
-            {
-                centreY = groundY;
-            }
-
-            int cy = (int)Math.Round(centreY);
-
-            // Telegraph the landing spot while there is still time to move.
-            if (strike.WindingUp)
-            {
+                // Telegraph: dotted line to the ground and the warning icon under the bird.
                 canvas.SetColor(White, (byte)((int)(_clock * 8.0) % 2 == 0 ? 170 : 90));
-                for (int y = cy + 26; y < groundY; y += 5)
+                for (int y = startY + 8; y < (int)GameModel.GroundY; y += 5)
                 {
                     canvas.FillRect(cx, y, 1, 2);
                 }
-            }
 
-            if (bossArt != null && bossArt.Flock != null)
-            {
-                // Frames 1-5 gather, 6-7 dive, 8-10 burst.
-                int frame;
-                if (strike.WindingUp)
+                int wx = cx - GameModel.FlockWarnW / 2;
+                int wy = startY - GameModel.FlockWarnH / 2;
+                if (bossArt != null && bossArt.FlockWarn != null)
                 {
-                    frame = (int)(5 * strike.Time / GameModel.FeatherWindupSeconds);
-                }
-                else if (strike.Plunging)
-                {
-                    frame = 5 + (int)(2 * (strike.Time - GameModel.FeatherWindupSeconds) / GameModel.FeatherPlungeSeconds);
+                    canvas.DrawSprite(BossSprites.Loop(bossArt.FlockWarn, strike.Time, BossSprites.WarnFps),
+                                      wx, wy, wx + GameModel.FlockWarnW, wy + GameModel.FlockWarnH);
                 }
                 else
                 {
-                    frame = 7 + (int)(3 * (strike.Time - GameModel.FeatherWindupSeconds - GameModel.FeatherPlungeSeconds)
-                                      / GameModel.FeatherImpactSeconds);
+                    canvas.SetColor(GameModel.Gold);
+                    canvas.FillRect(wx + 5, wy, 2, 5);
+                    canvas.FillRect(wx + 5, wy + 6, 2, 2);
                 }
 
-                frame = Math.Max(0, Math.Min(9, frame));
-                canvas.DrawSprite(bossArt.Flock[frame], cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2);
                 return;
             }
 
-            // Procedural flock: eight feathers that orbit, then streak, then scatter.
-            const int feathers = 8;
-            for (int i = 0; i < feathers; i++)
+            foreach (GameModel.Feather feather in strike.Feathers)
             {
-                double angle = i * (Math.PI * 2 / feathers);
-                int fx, fy, fw, fh;
-                byte alpha = 230;
-                if (strike.WindingUp)
+                int fx = (int)Math.Round(feather.X);
+                int fy = (int)Math.Round(feather.Y);
+                int fw = feather.Width;
+                int fh = feather.Height;
+
+                if (feather.Landed)
                 {
-                    double spin = _clock * 6.0 + angle;
-                    double radius = 12 + 4 * Math.Sin(_clock * 9.0 + i);
-                    fx = cx + (int)Math.Round(Math.Cos(spin) * radius);
-                    fy = cy + (int)Math.Round(Math.Sin(spin) * radius * 0.6);
-                    fw = 5;
-                    fh = 3;
+                    int bs = GameModel.FeatherBurstSize;
+                    int bx = fx + fw / 2 - bs / 2;
+                    int by = fy + fh / 2 - bs / 2;
+                    if (bossArt != null && bossArt.FeatherBurst != null)
+                    {
+                        canvas.DrawSprite(BossSprites.Once(bossArt.FeatherBurst, feather.BurstTime, GameModel.FeatherBurstSeconds),
+                                          bx, by, bx + bs, by + bs);
+                    }
+                    else
+                    {
+                        double p = feather.BurstTime / GameModel.FeatherBurstSeconds;
+                        canvas.SetColor(White, (byte)(200 * (1.0 - p)));
+                        int r = 2 + (int)(6 * p);
+                        canvas.FillOval(fx + fw / 2 - r, fy + fh / 2 - r, r * 2, r * 2);
+                    }
+
+                    continue;
                 }
-                else if (strike.Plunging)
+
+                SpriteFrame[] clip = bossArt == null ? null : (feather.Down ? bossArt.DownFall : bossArt.FeatherFall);
+                if (clip != null)
                 {
-                    fx = cx + (int)Math.Round(Math.Cos(angle) * 4);
-                    fy = cy - 14 + i * 3;
-                    fw = 3;
-                    fh = 7;
+                    canvas.DrawSprite(BossSprites.Loop(clip, _clock + feather.FrameOffset, BossSprites.FeatherFps),
+                                      fx, fy, fx + fw, fy + fh);
                 }
                 else
                 {
-                    double p = (strike.Time - GameModel.FeatherWindupSeconds - GameModel.FeatherPlungeSeconds)
-                               / GameModel.FeatherImpactSeconds;
-                    double radius = 22 * p;
-                    fx = cx + (int)Math.Round(Math.Cos(angle) * radius);
-                    fy = cy - 4 - (int)Math.Round(Math.Abs(Math.Sin(angle)) * radius * 0.5);
-                    fw = 4;
-                    fh = 3;
-                    alpha = (byte)(230 * (1.0 - p));
+                    // Placeholder: a small white oval that narrows as it "turns".
+                    double turn = Math.Abs(Math.Sin((_clock + feather.FrameOffset) * 6.0));
+                    int ow = Math.Max(2, (int)Math.Round(fw * (0.4 + 0.6 * turn)));
+                    canvas.SetColor(White);
+                    canvas.FillOval(fx + (fw - ow) / 2, fy, ow, fh);
                 }
-
-                canvas.SetColor(White, alpha);
-                canvas.FillOval(fx - fw / 2, fy - fh / 2, fw, fh);
-                canvas.SetColor(Muted, (byte)(alpha / 2));
-                canvas.FillRect(fx, fy - fh / 2, 1, fh);
             }
         }
 

@@ -47,6 +47,14 @@ namespace RottenEggs
         Sleep
     }
 
+    /// <summary>What the airborne boss is doing: cruising, chasing, or stalled overhead.</summary>
+    public enum BossFlyState
+    {
+        Sweeping,
+        Approaching,
+        Hovering
+    }
+
     /// <summary>
     /// Which chicken clip is on screen. Looping states keep replaying while
     /// their condition still holds; the rest run through once and hold their
@@ -151,25 +159,47 @@ namespace RottenEggs
         public const double BossFlyLift = 34;             // px the boss rises above its perch
         public const double BossFlySpeed = 70;            // px/s sweep while airborne
         public const double BossLiftSpeed = 90;           // px/s take-off / landing
+        public const double BossFlyMinX = 48;             // airborne, it ranges over the whole arena...
+        public const double BossFlyMaxX = 432;
+        public const double BossApproachSpeed = 120;      // ...and chases the basket slower than it can run
+        public const double BossApproachMaxSeconds = 3.5; // long enough to cross the arena, so no corner is safe from a standstill
+        public const double BossArriveDistance = 4;
 
-        // Feather strike: a flock gathers over the player, dives, and bursts on the ground.
-        public const double FeatherStrikeInterval = 2.2;
-        public const double FeatherWindupSeconds = 0.5;
-        public const double FeatherPlungeSeconds = 0.35;
-        public const double FeatherImpactSeconds = 0.3;
-        public const double FeatherHoverY = 78;           // flock's centre while it winds up
-        public const double FeatherHitRadius = 26;
+        // Feather wave: the boss stalls overhead and a warning sits beneath it
+        // while it hovers; on release a wave of tumbling feathers falls from
+        // under its body. Each one is its own projectile, so the wave has width
+        // and the feathers arrive a little apart, but a wave costs at most half
+        // a heart. Feathers that miss drift on to the dirt and burst there.
+        public const double FeatherStrikeInterval = 1.6;  // sweep time between attacks
+        public const double FeatherWindupSeconds = 0.6;   // the hover; the warning shows for all of it
+        public const double FeatherReleaseOffset = 70;    // wave origin below the boss's top edge
+        public const double FeatherFallSpeed = 140;       // px/s before each feather's own 0.8-1.2 factor
+        public const double FeatherWaveSpread = 22;       // half-width of the wave around the release point
+        public const double FeatherBurstSeconds = 0.24;   // 4 burst frames at 60ms
+        public const int FeathersPerWave = 5;
+        public const int DownPerWave = 3;                 // small fluff mixed in so the wave is not uniform
+        public const int FeatherW = 12;
+        public const int FeatherH = 14;
+        public const int DownW = 8;
+        public const int DownH = 8;
+        public const int FeatherBurstSize = 16;
+        public const int FlockWarnW = 12;
+        public const int FlockWarnH = 8;
 
-        // Bomb: dropped on the lay frame of the jump, sits with a burning fuse, then blows.
+        // Bomb: dropped on the lay frame of the jump onto the egg rect, so it falls
+        // through the same path with the same hit box as everything else the
+        // player judges. It sits with a burning fuse, flashes red, then blows.
         public const double BombDropInterval = 2.4;
         public const double BombDropFrameSeconds = 0.4;   // frame 5 of the 6-frame jump
         public const double BombFallSpeed = 160;
-        public const double BombFuseSeconds = 1.0;        // 5 fuse frames at 0.2s
-        public const double BombExplodeSeconds = 0.6;     // 6 blast frames at 0.1s
-        public const double BombHurtWindow = 0.3;         // only the fireball frames hurt
-        public const double BombBlastRadius = 40;
-        public const int BombSize = 24;
-        public const int BlastSize = 48;
+        public const double BombFuseSeconds = 1.0;
+        public const double BombArmedSeconds = 0.5;       // red flash for the last half second
+        public const double BombExplodeSeconds = 0.42;    // 7 blast frames at 60ms
+        public const double BombHurtWindow = 0.24;        // the four fireball frames
+        public const double BombBlastRadius = 40;         // fireball edge touching the basket edge
+        public const int BombW = 14;
+        public const int BombH = 18;
+        public const int BlastSize = 32;
 
         /// <summary>Chicken artwork is drawn from its top-left, with the feet 40px down.</summary>
         public const double ChickenH = 40;
@@ -302,6 +332,8 @@ namespace RottenEggs
             public BossPhase BossPhase = BossPhase.Fly;
             public double BossPhaseTime;
             public double BossAttackTimer;
+            public BossFlyState FlyState = BossFlyState.Sweeping;
+            public double FlyStateTime;
             /// <summary>Set when a jump has started and its bomb has not yet left the boss.</summary>
             public bool BombPending;
             /// <summary>How far above the perch the boss currently hovers; 0 on the ground.</summary>
@@ -533,14 +565,16 @@ namespace RottenEggs
         public readonly List<FeatherStrike> Feathers = new List<FeatherStrike>();
 
         /// <summary>
-        /// A bomb the boss lets go of mid-jump. It falls, lands, burns its fuse,
-        /// then blows; the blast hurts a basket within <see cref="BombBlastRadius"/>
-        /// of its centre during the fireball frames, once.
+        /// A bomb the boss lets go of mid-jump. It falls on the egg rect, lands,
+        /// burns its fuse, flashes red, then blows; the blast hurts a basket
+        /// within <see cref="BombBlastRadius"/> of its centre during the
+        /// fireball frames, once.
         /// </summary>
         public sealed class Bomb
         {
-            public double X;          // top-left of the 24x24 art
+            public double X;          // top-left of the 14x18 art
             public double Y;
+            public double Age;        // drives the falling wobble
             public bool Landed;
             public double FuseTime;   // seconds since landing
             public bool Exploded;
@@ -555,46 +589,89 @@ namespace RottenEggs
 
             public double CenterX
             {
-                get { return X + BombSize / 2.0; }
+                get { return X + BombW / 2.0; }
+            }
+
+            public double CenterY
+            {
+                get { return Y + BombH / 2.0; }
+            }
+
+            /// <summary>The red flash in the last half second of the fuse.</summary>
+            public bool Armed
+            {
+                get { return Landed && !Exploded && FuseTime >= BombFuseSeconds - BombArmedSeconds; }
+            }
+        }
+
+        /// <summary>One feather (or a bit of down) tumbling out of a wave.</summary>
+        public sealed class Feather
+        {
+            public double X;                    // top-left
+            public double Y;
+            public readonly double Vy;
+            public readonly double FrameOffset; // seconds, so the flutters never sync up
+            public readonly bool Down;          // the small fluff
+            public bool Landed;
+            public double BurstTime;
+
+            public Feather(double x, double y, double vy, double frameOffset, bool down)
+            {
+                X = x;
+                Y = y;
+                Vy = vy;
+                FrameOffset = frameOffset;
+                Down = down;
+            }
+
+            public int Width
+            {
+                get { return Down ? DownW : FeatherW; }
+            }
+
+            public int Height
+            {
+                get { return Down ? DownH : FeatherH; }
+            }
+
+            public Rect Bounds()
+            {
+                return new Rect((float)X, (float)Y, Width, Height);
             }
         }
 
         /// <summary>
-        /// A flock of feathers the flying boss sends at the player. It gathers
-        /// over the basket's position at launch, dives, and bursts on the
-        /// ground; a basket still under it at impact is hurt, once.
+        /// A feather wave from the stalled boss. While it winds up, a warning
+        /// sits under the bird; on release the feathers fall from there, each
+        /// on its own path, and the first to reach the basket is the one that
+        /// hurts. The wave is over when every feather has landed and burst.
         /// </summary>
         public sealed class FeatherStrike
         {
-            public readonly double X;   // centre, fixed at launch
+            public readonly double X;       // centre, fixed at launch: directly under the stalled boss
+            public readonly double StartY;  // where the wave forms, just beneath the boss
+            public readonly List<Feather> Feathers = new List<Feather>();
             public double Time;
+            public bool Released;
             public bool Hurt;
 
-            public FeatherStrike(double x)
+            public FeatherStrike(double x, double startY)
             {
                 X = x;
+                StartY = startY;
             }
 
             public bool WindingUp
             {
-                get { return Time < FeatherWindupSeconds; }
-            }
-
-            public bool Plunging
-            {
-                get { return Time >= FeatherWindupSeconds && Time < FeatherWindupSeconds + FeatherPlungeSeconds; }
-            }
-
-            public bool Impacting
-            {
-                get { return Time >= FeatherWindupSeconds + FeatherPlungeSeconds && !Finished; }
+                get { return !Released; }
             }
 
             public bool Finished
             {
-                get { return Time >= FeatherWindupSeconds + FeatherPlungeSeconds + FeatherImpactSeconds; }
+                get { return Released && Feathers.Count == 0; }
             }
         }
+
         public readonly List<Particle> Particles = new List<Particle>();
         public readonly List<GameEvent> Events = new List<GameEvent>();
         public readonly double[] SpawnTimers = new double[2];
@@ -1105,19 +1182,15 @@ namespace RottenEggs
                 case BossPhase.Fly:
                 {
                     boss.FlyLift = Math.Min(BossFlyLift, boss.FlyLift + BossLiftSpeed * dt);
-                    PatrolStep(boss, dt, BossFlySpeed);
+                    boss.FlyStateTime += dt;
                     if (boss.ActionTime <= 0)
                     {
                         boss.Loop(AnimState.Fly);
                     }
 
-                    if (boss.BossAttackTimer <= 0)
-                    {
-                        Feathers.Add(new FeatherStrike(player.BasketX + BasketW / 2));
-                        boss.BossAttackTimer = FeatherStrikeInterval;
-                    }
+                    UpdateBossFlight(boss, player, dt);
 
-                    if (boss.BossPhaseTime >= BossFlySeconds)
+                    if (boss.BossPhaseTime >= BossFlySeconds && boss.FlyState == BossFlyState.Sweeping)
                     {
                         EnterBossPhase(boss, BossPhase.Bomb);
                     }
@@ -1128,7 +1201,23 @@ namespace RottenEggs
                 case BossPhase.Bomb:
                 {
                     boss.FlyLift = Math.Max(0, boss.FlyLift - BossLiftSpeed * dt);
-                    PatrolStep(boss, dt, ChickenPatrolSpeed(boss));
+
+                    // Airborne it ranged past its perch; glide back over the lane
+                    // before settling into the ground patrol.
+                    if (boss.CenterX < boss.MinX)
+                    {
+                        boss.CenterX = Math.Min(boss.MinX, boss.CenterX + BossFlySpeed * dt);
+                        boss.Facing = boss.Direction = 1;
+                    }
+                    else if (boss.CenterX > boss.MaxX)
+                    {
+                        boss.CenterX = Math.Max(boss.MaxX, boss.CenterX - BossFlySpeed * dt);
+                        boss.Facing = boss.Direction = -1;
+                    }
+                    else
+                    {
+                        PatrolStep(boss, dt, ChickenPatrolSpeed(boss));
+                    }
 
                     // Start a jump on the beat; the bomb leaves on the lay frame, so
                     // the drop reads off the animation exactly as a laid egg does.
@@ -1142,7 +1231,7 @@ namespace RottenEggs
                     if (boss.BombPending && boss.Anim == AnimState.Jumping && boss.AnimTime >= BombDropFrameSeconds)
                     {
                         boss.BombPending = false;
-                        Bombs.Add(new Bomb(boss.CenterX - BombSize / 2.0, boss.DrawY + 24));
+                        Bombs.Add(new Bomb(boss.CenterX - BombW / 2.0, boss.DrawY + 24));
                     }
 
                     if (boss.ActionTime <= 0)
@@ -1177,6 +1266,90 @@ namespace RottenEggs
             }
         }
 
+        /// <summary>
+        /// The airborne boss cruises the arena, breaks off to chase the basket,
+        /// stalls directly over it, and only then lets the flock go — so the
+        /// feathers fall straight from a bird that is no longer moving.
+        /// </summary>
+        private void UpdateBossFlight(Chicken boss, PlayerState player, double dt)
+        {
+            switch (boss.FlyState)
+            {
+                case BossFlyState.Sweeping:
+                {
+                    FlyStep(boss, dt, BossFlySpeed);
+                    if (boss.BossAttackTimer <= 0)
+                    {
+                        boss.FlyState = BossFlyState.Approaching;
+                        boss.FlyStateTime = 0;
+                    }
+
+                    break;
+                }
+
+                case BossFlyState.Approaching:
+                {
+                    double target = Clamp(player.BasketX + BasketW / 2, BossFlyMinX, BossFlyMaxX);
+                    double gap = target - boss.CenterX;
+                    double step = BossApproachSpeed * dt;
+                    if (Math.Abs(gap) <= step)
+                    {
+                        boss.CenterX = target;
+                    }
+                    else
+                    {
+                        boss.CenterX += Math.Sign(gap) * step;
+                        boss.Facing = boss.Direction = Math.Sign(gap);
+                    }
+
+                    bool overhead = Math.Abs(target - boss.CenterX) <= BossArriveDistance;
+                    if (overhead || boss.FlyStateTime >= BossApproachMaxSeconds)
+                    {
+                        // Brake, and start gathering the flock right under the body.
+                        boss.FlyState = BossFlyState.Hovering;
+                        boss.FlyStateTime = 0;
+                        Feathers.Add(new FeatherStrike(boss.CenterX, boss.DrawY + FeatherReleaseOffset));
+                    }
+
+                    break;
+                }
+
+                case BossFlyState.Hovering:
+                {
+                    // Wings beat double-time while it holds position.
+                    boss.AnimTime += dt;
+                    if (boss.FlyStateTime >= FeatherWindupSeconds)
+                    {
+                        // Release: the flock dives on its own now; peel away towards open sky.
+                        boss.FlyState = BossFlyState.Sweeping;
+                        boss.FlyStateTime = 0;
+                        boss.BossAttackTimer = FeatherStrikeInterval;
+                        boss.Facing = boss.Direction = boss.CenterX < WorldW / 2.0 ? 1 : -1;
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        /// <summary>Cruises the full arena width, turning at the edges without pausing.</summary>
+        private static void FlyStep(Chicken boss, double dt, double speed)
+        {
+            boss.CenterX += boss.Direction * speed * dt;
+            if (boss.CenterX < BossFlyMinX)
+            {
+                boss.CenterX = BossFlyMinX + (BossFlyMinX - boss.CenterX);
+                boss.Direction = 1;
+            }
+            else if (boss.CenterX > BossFlyMaxX)
+            {
+                boss.CenterX = BossFlyMaxX - (boss.CenterX - BossFlyMaxX);
+                boss.Direction = -1;
+            }
+
+            boss.Facing = boss.Direction;
+        }
+
         private void EnterBossPhase(Chicken boss, BossPhase phase)
         {
             boss.BossPhase = phase;
@@ -1184,6 +1357,8 @@ namespace RottenEggs
             boss.BossAttackTimer = BossFirstAttackDelay;
             boss.BombPending = false;
             boss.StandTime = 0;
+            boss.FlyState = BossFlyState.Sweeping;
+            boss.FlyStateTime = 0;
 
             switch (phase)
             {
@@ -1208,12 +1383,13 @@ namespace RottenEggs
             for (int i = Bombs.Count - 1; i >= 0; i--)
             {
                 Bomb bomb = Bombs[i];
+                bomb.Age += dt;
                 if (!bomb.Landed)
                 {
                     bomb.Y += BombFallSpeed * dt;
-                    if (bomb.Y + BombSize >= GroundY)
+                    if (bomb.Y + BombH >= GroundY)
                     {
-                        bomb.Y = GroundY - BombSize;
+                        bomb.Y = GroundY - BombH;
                         bomb.Landed = true;
                     }
                 }
@@ -1243,20 +1419,71 @@ namespace RottenEggs
                 }
             }
 
+            Rect basket = player.BasketBounds();
             for (int i = Feathers.Count - 1; i >= 0; i--)
             {
                 FeatherStrike strike = Feathers[i];
                 strike.Time += dt;
-                if (!strike.Hurt && strike.Impacting && Math.Abs(strike.X - basketCenter) < FeatherHitRadius)
+                if (!strike.Released && strike.Time >= FeatherWindupSeconds)
                 {
-                    strike.Hurt = true;
-                    HurtPlayer(player, "FEATHERED!  -1/2 HEART");
+                    strike.Released = true;
+                    SpawnFeatherWave(strike);
+                }
+
+                for (int f = strike.Feathers.Count - 1; f >= 0; f--)
+                {
+                    Feather feather = strike.Feathers[f];
+                    if (!feather.Landed)
+                    {
+                        feather.Y += feather.Vy * dt;
+                        if (!strike.Hurt && feather.Bounds().Overlaps(basket))
+                        {
+                            strike.Hurt = true;
+                            feather.Landed = true;
+                            HurtPlayer(player, "FEATHERED!  -1/2 HEART");
+                        }
+                        else if (feather.Y + feather.Height >= GroundY)
+                        {
+                            feather.Y = GroundY - feather.Height;
+                            feather.Landed = true;
+                        }
+                    }
+                    else
+                    {
+                        feather.BurstTime += dt;
+                        if (feather.BurstTime >= FeatherBurstSeconds)
+                        {
+                            strike.Feathers.RemoveAt(f);
+                        }
+                    }
                 }
 
                 if (strike.Finished)
                 {
                     Feathers.RemoveAt(i);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Fills a wave: feathers scattered across the wave's width, each with
+        /// its own fall rate and flutter phase so they never move as one. The
+        /// first feather is placed dead centre, so a basket that has not moved
+        /// since the boss stalled over it is always reached.
+        /// </summary>
+        private void SpawnFeatherWave(FeatherStrike strike)
+        {
+            int total = FeathersPerWave + DownPerWave;
+            for (int i = 0; i < total; i++)
+            {
+                bool down = i >= FeathersPerWave;
+                int width = down ? DownW : FeatherW;
+                double offset = i == 0 ? 0 : -FeatherWaveSpread + Random.NextDouble() * FeatherWaveSpread * 2;
+                double x = strike.X - width / 2.0 + offset;
+                double y = strike.StartY - 8 + Random.NextDouble() * 16;
+                double vy = FeatherFallSpeed * (0.8 + Random.NextDouble() * 0.4);
+                double phase = Random.NextDouble() * 0.8;
+                strike.Feathers.Add(new Feather(x, y, vy, phase, down));
             }
         }
 

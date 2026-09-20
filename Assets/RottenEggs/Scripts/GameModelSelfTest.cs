@@ -602,35 +602,43 @@ namespace RottenEggs
             bossRun.StartRound(Mode.Single, Stage.BossStage);
             GameModel.Chicken bossChicken = bossRun.Chickens[0];
             GameModel.PlayerState hero = bossRun.Player(0);
-            // The bossChicken keeps laying eggs; drain them so only its attacks touch the hero here.
+            // The boss keeps laying eggs; drain them so only its attacks touch the hero here.
             Action tick = () =>
             {
                 bossRun.Update(0.05, 0, 0);
                 bossRun.FallingEggs.Clear();
             };
             Require(bossChicken.IsBoss && bossChicken.BossPhase == BossPhase.Fly && !bossChicken.BossVulnerable,
-                "the bossChicken must open the fight airborne and armoured");
+                "the boss must open the fight airborne and armoured");
             checks++;
 
-            // An egg thrown at the awake bossChicken is spent but does no damage.
+            // An egg thrown at the awake boss is spent but does no damage.
             hero.Ammo = 5;
             int hpBefore = bossChicken.Hp;
             bossRun.Shots.Add(new GameModel.Shot(bossChicken.CenterX - GameModel.EggW / 2, bossChicken.DrawY + 10));
             tick();
             Require(bossChicken.Hp == hpBefore && bossRun.Shots.Count == 0,
-                "an awake bossChicken must shrug an egg off without losing health");
+                "an awake boss must shrug an egg off without losing health");
             checks++;
 
-            // Flying long enough launches a feather strike aimed at the basket.
-            for (int i = 0; i < 30 && bossRun.Feathers.Count == 0; i++)
+            // Flying long enough, the boss breaks off, chases the basket, stalls
+            // over it, and the flock gathers beneath the now-stationary bird.
+            for (int i = 0; i < 80 && bossRun.Feathers.Count == 0; i++)
             {
                 tick();
             }
 
-            Require(bossRun.Feathers.Count == 1
-                    && Math.Abs(bossRun.Feathers[0].X - (hero.BasketX + GameModel.BasketW / 2)) < 0.001,
-                "the flying bossChicken must send a feather strike at the basket's position");
-            checks++;
+            Require(bossRun.Feathers.Count == 1 && bossChicken.FlyState == BossFlyState.Hovering,
+                "the flying boss must stall overhead before letting the flock go");
+            Require(Math.Abs(bossRun.Feathers[0].X - bossChicken.CenterX) < 0.001
+                    && Math.Abs(bossRun.Feathers[0].X - (hero.BasketX + GameModel.BasketW / 2)) <= GameModel.BossArriveDistance + 0.001,
+                "the flock must form directly under the boss, which is directly over the basket");
+            double stalledX = bossChicken.CenterX;
+            tick();
+            tick();
+            Require(bossChicken.CenterX == stalledX && bossRun.Feathers[0].WindingUp,
+                "the boss must hold still while the flock gathers");
+            checks += 3;
 
             // Standing still under it costs half a heart; a shield takes it instead.
             hero.ShieldCount = 1;
@@ -644,13 +652,13 @@ namespace RottenEggs
                 "a feather strike must be absorbed by a shield before it touches hearts");
             checks++;
 
-            // Cycle: the bossChicken lands to bomb, then falls asleep and becomes vulnerable.
+            // Cycle: the boss lands to bomb, then falls asleep and becomes vulnerable.
             while (bossChicken.BossPhase == BossPhase.Fly)
             {
                 tick();
             }
 
-            Require(bossChicken.BossPhase == BossPhase.Bomb, "after flying the bossChicken must land and start bombing");
+            Require(bossChicken.BossPhase == BossPhase.Bomb, "after flying the boss must land and start bombing");
             checks++;
 
             for (int i = 0; i < 80 && bossRun.Bombs.Count == 0; i++)
@@ -658,7 +666,7 @@ namespace RottenEggs
                 tick();
             }
 
-            Require(bossRun.Bombs.Count >= 1, "the bombing bossChicken must drop a bomb on its jump");
+            Require(bossRun.Bombs.Count >= 1, "the bombing boss must drop a bomb on its jump");
             checks++;
 
             // Park the basket under the bomb and let it go off.
@@ -681,13 +689,13 @@ namespace RottenEggs
             }
 
             Require(bossChicken.BossPhase == BossPhase.Sleep && bossChicken.BossVulnerable,
-                "after bombing the bossChicken must fall asleep and drop its guard");
+                "after bombing the boss must fall asleep and drop its guard");
             checks++;
 
             hpBefore = bossChicken.Hp;
             bossRun.Shots.Add(new GameModel.Shot(bossChicken.CenterX - GameModel.EggW / 2, bossChicken.DrawY + 10));
             tick();
-            Require(bossChicken.Hp == hpBefore - 1, "an egg must hurt the sleeping bossChicken");
+            Require(bossChicken.Hp == hpBefore - 1, "an egg must hurt the sleeping boss");
             checks++;
 
             while (bossChicken.BossPhase == BossPhase.Sleep)
@@ -696,7 +704,7 @@ namespace RottenEggs
             }
 
             Require(bossChicken.BossPhase == BossPhase.Fly && bossRun.Bombs.Count == 0,
-                "the bossChicken must wake back into flight with the field cleared");
+                "the boss must wake back into flight with the field cleared");
             checks++;
 
             return "SELF-TEST PASSED: " + checks + " gameplay checks";
