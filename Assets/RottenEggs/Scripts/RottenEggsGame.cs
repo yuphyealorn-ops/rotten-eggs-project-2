@@ -37,6 +37,9 @@ namespace RottenEggs
 
         /// <summary>Drives the menu chickens, whose clock the paused game rules do not run.</summary>
         private double menuClock;
+
+        /// <summary>The gameplay track last requested, so the stage switch fires once.</summary>
+        private AudioManager.Music? gameplayMusic;
         private int menuSelection;
         private bool ready;
         private bool paused;
@@ -114,6 +117,7 @@ namespace RottenEggs
                 model.Update(dt, p1Axis, p2Axis);
             }
             PlayModelEvents();
+            SyncMusic();
         }
 
         // A transition consumes the frame so confirm/back cannot also throw or move.
@@ -247,7 +251,30 @@ namespace RottenEggs
             paused = false;
             model.StartRound(selectedMode, Stage.Stage1);
             audioManager.Play(AudioManager.Sfx.UiConfirm);
-            audioManager.PlayMusic(AudioManager.Music.Game);
+        }
+
+        /// <summary>
+        /// Keeps the gameplay track matched to the stage: the boss theme while
+        /// the boss stage is live, the ordinary loop otherwise. PlayMusic already
+        /// ignores a request for the track it is playing, so this is cheap.
+        /// </summary>
+        private void SyncMusic()
+        {
+            if (model.Phase == Phase.Menu)
+            {
+                gameplayMusic = null;
+                return;
+            }
+
+            bool bossStage = model.Mode == Mode.Single && model.CurrentStage == Stage.BossStage;
+            AudioManager.Music wanted = bossStage ? AudioManager.Music.Boss : AudioManager.Music.Game;
+            if (gameplayMusic == wanted)
+            {
+                return;
+            }
+
+            gameplayMusic = wanted;
+            audioManager.PlayMusic(wanted);
         }
 
         private void RestartRound()
@@ -255,7 +282,6 @@ namespace RottenEggs
             paused = false;
             model.RestartCurrentMode();
             audioManager.Play(AudioManager.Sfx.UiConfirm);
-            audioManager.PlayMusic(AudioManager.Music.Game);
         }
 
         private void ReturnToMenu()
@@ -327,6 +353,10 @@ namespace RottenEggs
                     return AudioManager.Sfx.Boost;
                 case EventType.ChickenDown:
                     return AudioManager.Sfx.ChickenDown;
+                case EventType.Explosion:
+                    return AudioManager.Sfx.Explosion;
+                case EventType.Feather:
+                    return AudioManager.Sfx.Swipe;
                 case EventType.Lose:
                     return AudioManager.Sfx.Lose;
                 default:

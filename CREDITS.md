@@ -15,7 +15,8 @@ License code: 7KU8TDXSLIEU4LBY
 
 | Asset | Creator | Source | Licence |
 |---|---|---|---|
-| Title screen song | Rest! (Ricardo Cuello) | https://richarrest.itch.io/cozy-sim-music-pack-town-life | CC BY-SA 4.0 |
+| Title screen song: "1_new_life_master" | Rest! (Ricardo Cuello) | https://richarrest.itch.io/cozy-sim-music-pack-town-life | CC BY-SA 4.0 |
+| Boss fight theme: "Old MacDonald but it's a Boss Fight song" | chrisyqn | https://www.youtube.com/watch?v=j3EOoZWDPk4 | |
 
 ## Art
 
@@ -24,6 +25,12 @@ License code: 7KU8TDXSLIEU4LBY
 | Heart icons | VampireGirl | https://fliflifly.itch.io/hearts-and-health-bar | CC-0 |
 | Chicken animation | vmiinv | https://vmiinv.itch.io/chickenpack-asset | |
 
+## Sound effects
+
+| Asset | Creator | Source | Licence |
+| Bomb explosion: explosion_quick.wav, explosion_small.wav, swipe.wav | Chequered Ink | https://ci.itch.io/400-sounds-pack | |
+| Feather attack: swipe.wav | Chequered Ink | https://ci.itch.io/400-sounds-pack | |
+
 ## Made for this project
 
-The sound effects and the pixel font were created by the team.
+The pixel font, and art/sound effects that were not mentioned were created by the team using generative AI.

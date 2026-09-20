@@ -695,16 +695,41 @@ namespace RottenEggs
             hpBefore = bossChicken.Hp;
             bossRun.Shots.Add(new GameModel.Shot(bossChicken.CenterX - GameModel.EggW / 2, bossChicken.DrawY + 10));
             tick();
-            Require(bossChicken.Hp == hpBefore - 1, "an egg must hurt the sleeping boss");
+            Require(bossChicken.Hp == hpBefore - 1 && bossChicken.BossPhase == BossPhase.Sleep,
+                "an egg must hurt the sleeping boss, and one hit must not wake it");
             checks++;
 
-            while (bossChicken.BossPhase == BossPhase.Sleep)
+            // The second hit of the nap wakes it, so a stockpile can't end the fight in one sleep.
+            for (int i = 0; i < 20 && bossChicken.ActionTime > 0; i++)
             {
                 tick();
             }
 
-            Require(bossChicken.BossPhase == BossPhase.Fly && bossRun.Bombs.Count == 0,
-                "the boss must wake back into flight with the field cleared");
+            bossRun.Shots.Add(new GameModel.Shot(bossChicken.CenterX - GameModel.EggW / 2, bossChicken.DrawY + 10));
+            tick();
+            Require(bossChicken.Hp == hpBefore - 2 && bossChicken.BossPhase == BossPhase.Fly && !bossChicken.BossVulnerable,
+                "a second hit in the same sleep must wake the boss into flight, armoured again");
+            checks++;
+
+            // A bomb dropped at the end of the bombing phase may still be burning;
+            // every bomb must be gone within its fall, fuse and smoke time.
+            double bombLifetime = 1.0 + GameModel.BombFuseSeconds + GameModel.BombExplodeSeconds;
+            for (int i = 0; i < (int)Math.Ceiling(bombLifetime / 0.05) && bossRun.Bombs.Count > 0; i++)
+            {
+                tick();
+            }
+
+            Require(bossRun.Bombs.Count == 0, "no bomb outlives its fall, fuse and smoke");
+            checks++;
+
+            // The damage flash starts on the sheet's first red frame, not its lead-in.
+            GameModel probeRun = new GameModel(new Random(3));
+            probeRun.StartRound(Mode.Single);
+            probeRun.ApplyChickenHit(probeRun.Chickens[1]);
+            Require(probeRun.Chickens[1].Anim == AnimState.Damage
+                    && Math.Abs(probeRun.Chickens[1].AnimTime - GameModel.DamageLeadInSeconds) < 1e-9
+                    && Math.Abs(probeRun.Chickens[1].ActionTime - (GameModel.DamageAnimSeconds - GameModel.DamageLeadInSeconds)) < 1e-9,
+                "a hit must start the damage clip on its first red frame and run only the rest of it");
             checks++;
 
             return "SELF-TEST PASSED: " + checks + " gameplay checks";

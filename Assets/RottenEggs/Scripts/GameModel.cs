@@ -80,7 +80,9 @@ namespace RottenEggs
         Power,
         ChickenDown,
         Win,
-        Lose
+        Lose,
+        Explosion,     // a bomb went off
+        Feather        // a feather wave was released
     }
 
     public static class AnimStates
@@ -152,6 +154,7 @@ namespace RottenEggs
         // ── Boss fight ────────────────────────────────────────────────────────
         // The boss cycles Fly → Bomb → Sleep and can only be hurt while asleep.
         public const int BossHp = 8;
+        public const int BossHitsPerSleep = 2;             // it wakes after this many, so a sleep can't be spammed
         public const double BossFlySeconds = 8.0;
         public const double BossBombSeconds = 8.0;
         public const double BossSleepSeconds = 6.0;
@@ -200,6 +203,8 @@ namespace RottenEggs
         public const int BombW = 14;
         public const int BombH = 18;
         public const int BlastSize = 32;
+        /// <summary>The bomb settles on the same ground plane as the basket, clear of the dirt.</summary>
+        public const double BombRestY = BasketY + BasketH;
 
         /// <summary>Chicken artwork is drawn from its top-left, with the feet 40px down.</summary>
         public const double ChickenH = 40;
@@ -211,6 +216,12 @@ namespace RottenEggs
         /// <summary>One-shot clip lengths, matched to the bundled sheets at 0.1s per frame.</summary>
         public const double LayAnimSeconds = 0.60;
         public const double DamageAnimSeconds = 0.60;
+        /// <summary>
+        /// The damage sheet's first three frames show the chicken unhurt; the red
+        /// flash starts on frame four. The clip is started here so a hit shows
+        /// instantly instead of a beat later.
+        /// </summary>
+        public const double DamageLeadInSeconds = 0.30;
         public const double DieAnimSeconds = 0.40;
 
         /// <summary>Idle beat a chicken takes after turning around at the end of its lane.</summary>
@@ -334,6 +345,7 @@ namespace RottenEggs
             public double BossAttackTimer;
             public BossFlyState FlyState = BossFlyState.Sweeping;
             public double FlyStateTime;
+            public int SleepHits;   // hits landed during the current sleep
             /// <summary>Set when a jump has started and its bomb has not yet left the boss.</summary>
             public bool BombPending;
             /// <summary>How far above the perch the boss currently hovers; 0 on the ground.</summary>
@@ -434,8 +446,9 @@ namespace RottenEggs
             public void PlayOnce(AnimState state, double seconds, bool stopWalking)
             {
                 Anim = state;
-                AnimTime = 0;
-                ActionTime = seconds;
+                double leadIn = state == AnimState.Damage ? DamageLeadInSeconds : 0;
+                AnimTime = leadIn;
+                ActionTime = Math.Max(0, seconds - leadIn);
                 if (stopWalking)
                 {
                     StandTime = Math.Max(StandTime, seconds);
@@ -1359,6 +1372,7 @@ namespace RottenEggs
             boss.StandTime = 0;
             boss.FlyState = BossFlyState.Sweeping;
             boss.FlyStateTime = 0;
+            boss.SleepHits = 0;
 
             switch (phase)
             {
@@ -1387,9 +1401,9 @@ namespace RottenEggs
                 if (!bomb.Landed)
                 {
                     bomb.Y += BombFallSpeed * dt;
-                    if (bomb.Y + BombH >= GroundY)
+                    if (bomb.Y + BombH >= BombRestY)
                     {
-                        bomb.Y = GroundY - BombH;
+                        bomb.Y = BombRestY - BombH;
                         bomb.Landed = true;
                     }
                 }
@@ -1400,6 +1414,7 @@ namespace RottenEggs
                     {
                         bomb.Exploded = true;
                         ShakeTime = 0.2;
+                        Emit(EventType.Explosion, 0);
                     }
                 }
                 else
@@ -1428,6 +1443,7 @@ namespace RottenEggs
                 {
                     strike.Released = true;
                     SpawnFeatherWave(strike);
+                    Emit(EventType.Feather, 0);
                 }
 
                 for (int f = strike.Feathers.Count - 1; f >= 0; f--)
@@ -2069,8 +2085,22 @@ namespace RottenEggs
             {
                 // The flash plays over the patrol so a hit never freezes the target.
                 chicken.PlayOnce(AnimState.Damage, DamageAnimSeconds, false);
-                SetStatus(player, "DIRECT HIT  +" + points, 0.7);
                 Emit(EventType.Hit, 0);
+
+                // The boss only takes so much in one nap: a second hit wakes it,
+                // so stockpiled eggs can't finish it in a single sleep.
+                if (chicken.IsBoss && chicken.BossPhase == BossPhase.Sleep)
+                {
+                    chicken.SleepHits++;
+                    if (chicken.SleepHits >= BossHitsPerSleep)
+                    {
+                        EnterBossPhase(chicken, BossPhase.Fly);
+                        SetStatus(player, "IT WOKE UP!  +" + points, 1.2);
+                        return;
+                    }
+                }
+
+                SetStatus(player, "DIRECT HIT  +" + points, 0.7);
             }
         }
 

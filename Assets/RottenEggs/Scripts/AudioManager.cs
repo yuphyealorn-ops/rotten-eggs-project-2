@@ -30,13 +30,16 @@ namespace RottenEggs
             Hit,
             ChickenDown,
             Win,
-            Lose
+            Lose,
+            Explosion,   // a bomb going off; two clips, picked at random
+            Swipe        // a feather wave released
         }
 
         public enum Music
         {
             Menu,
-            Game
+            Game,
+            Boss
         }
 
         private static readonly Dictionary<Sfx, string> SfxFiles = new Dictionary<Sfx, string>
@@ -56,7 +59,8 @@ namespace RottenEggs
         private static readonly Dictionary<Music, string> MusicFiles = new Dictionary<Music, string>
         {
             { Music.Menu, "menu-loop.wav" },
-            { Music.Game, "game-loop.wav" }
+            { Music.Game, "game-loop.wav" },
+            { Music.Boss, "game-loop.wav" }   // falls back to the ordinary loop if the boss track is missing
         };
 
         /// <summary>
@@ -70,7 +74,18 @@ namespace RottenEggs
         private static readonly Dictionary<Music, string[]> MusicResources = new Dictionary<Music, string[]>
         {
             { Music.Menu, new[] { "Audio/titlescreensong" } },
-            { Music.Game, new[] { "Audio/boogie", "Audio/pixel-drift" } }
+            { Music.Game, new[] { "Audio/boogie", "Audio/pixel-drift" } },
+            { Music.Boss, new[] { "Audio/boss_fight" } }
+        };
+
+        /// <summary>
+        /// Effects supplied as imported assets. A slot with several clips plays
+        /// a random one each time, never the same one twice running.
+        /// </summary>
+        private static readonly Dictionary<Sfx, string[]> SfxResources = new Dictionary<Sfx, string[]>
+        {
+            { Sfx.Explosion, new[] { "Audio/explosion_quick", "Audio/explosion_small" } },
+            { Sfx.Swipe, new[] { "Audio/swipe" } }
         };
 
         private static readonly System.Random musicPicker = new System.Random();
@@ -78,6 +93,8 @@ namespace RottenEggs
         private readonly Dictionary<Sfx, AudioSource> sfxSources = new Dictionary<Sfx, AudioSource>();
         private readonly Dictionary<Music, List<AudioClip>> musicClips = new Dictionary<Music, List<AudioClip>>();
         private readonly Dictionary<Music, int> lastMusicPick = new Dictionary<Music, int>();
+        private readonly Dictionary<Sfx, List<AudioClip>> sfxClips = new Dictionary<Sfx, List<AudioClip>>();
+        private readonly Dictionary<Sfx, int> lastSfxPick = new Dictionary<Sfx, int>();
         private AudioSource musicSource;
         private float volume = DefaultVolume;
         private bool muted;
@@ -120,7 +137,18 @@ namespace RottenEggs
             }
 
             AudioSource source;
-            if (!sfxSources.TryGetValue(effect, out source) || source == null || source.clip == null)
+            if (!sfxSources.TryGetValue(effect, out source) || source == null)
+            {
+                return;
+            }
+
+            List<AudioClip> choices;
+            if (sfxClips.TryGetValue(effect, out choices) && choices.Count > 0)
+            {
+                source.clip = PickSfx(effect, choices);
+            }
+
+            if (source.clip == null)
             {
                 return;
             }
@@ -322,6 +350,36 @@ namespace RottenEggs
                 sfxSources[entry.Key] = source;
             }
 
+            foreach (KeyValuePair<Sfx, string[]> entry in SfxResources)
+            {
+                List<AudioClip> clips = new List<AudioClip>();
+                foreach (string resourcePath in entry.Value)
+                {
+                    AudioClip clip = Resources.Load<AudioClip>(resourcePath);
+                    if (clip != null)
+                    {
+                        clips.Add(clip);
+                    }
+                    else
+                    {
+                        WarnOnce("no imported effect at Resources/" + resourcePath, null);
+                    }
+                }
+
+                if (clips.Count == 0)
+                {
+                    continue;
+                }
+
+                AudioSource source = host.AddComponent<AudioSource>();
+                source.playOnAwake = false;
+                source.loop = false;
+                source.spatialBlend = 0f;
+                source.clip = clips[0];
+                sfxSources[entry.Key] = source;
+                sfxClips[entry.Key] = clips;
+            }
+
             playbackAvailable = musicClips.Count > 0 || sfxSources.Count > 0;
             ApplyAllVolumes();
         }
@@ -360,6 +418,24 @@ namespace RottenEggs
         /// Chooses which of a slot's clips to play next: the only one if there is
         /// one, otherwise a random one that is not the clip played last time.
         /// </summary>
+        private AudioClip PickSfx(Sfx effect, List<AudioClip> clips)
+        {
+            int index = 0;
+            if (clips.Count > 1)
+            {
+                int previous;
+                bool hasPrevious = lastSfxPick.TryGetValue(effect, out previous);
+                do
+                {
+                    index = musicPicker.Next(clips.Count);
+                }
+                while (hasPrevious && index == previous);
+            }
+
+            lastSfxPick[effect] = index;
+            return clips[index];
+        }
+
         private AudioClip PickClip(Music track, List<AudioClip> clips)
         {
             int index = 0;

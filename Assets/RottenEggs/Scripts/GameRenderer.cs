@@ -11,7 +11,7 @@ namespace RottenEggs
     /// Day 3 additions (renderer only, no logic changes):
     ///   - CRT scanline overlay drawn last on every frame
     ///   - Two-layer twinkling starfield replaces uniform dot-grid sky
-    ///   - Menu: HIGH SCORE above panel, corner brackets, bouncing arrow
+    ///   - Menu: credits ticker above panel, corner brackets, bouncing arrow
     ///   - HUD: 1UP / 2UP labels, hearts backing box, flashing power labels, FEVER blink
     ///   - Result screen: corner brackets, blinking GAME OVER text for loss
     ///   - Duo divider: double solid line instead of dashed
@@ -326,11 +326,7 @@ namespace RottenEggs
 
         private void DrawMenuOverlay(AudioManager audio, int menuSelection)
         {
-            // ── Day 3: HIGH SCORE at top of screen (classic arcade position) ──
-            // Drawn above the panel in the open sky area — always visible.
-            DrawCenteredText("HIGH SCORE",  240, 22, GameModel.Gold, Black, FontTiny);
-            DrawCenteredText("00000",       240, 33, White,          Black, FontSmall);
-            // ─────────────────────────────────────────────────────────────────
+            DrawCreditsTicker();
 
             // Panel background
             canvas.SetColor(15, 29, 39, 232);
@@ -362,7 +358,7 @@ namespace RottenEggs
             DrawMenuOption(92, 99, 296, 31, 0, menuSelection,
                 "1  SINGLE PLAYER", "CATCH • THROW • CLEAR ALL " + GameModel.StageCount + " STAGES");
             DrawMenuOption(92, 134, 296, 31, 1, menuSelection,
-                "2  DUO PLAYER", controllerHints ? "P1 STICK • P2 ARROWS • SABOTAGE" : "P1 A/D • P2 ARROWS • POWER-EGG SABOTAGE");
+                "2  DUO PLAYER", controllerHints ? "P1 STICK • P2 ARROWS" : "P1 A/D • P2 ARROWS");
             DrawMenuOption(92, 169, 296, 31, 2, menuSelection,
                 "QUIT GAME", "CLOSE ROTTEN EGGS");
 
@@ -389,6 +385,33 @@ namespace RottenEggs
             canvas.FillRect(416 - 2, 234, 2, 8);
             DrawCenteredText("A GAME BY", 240, 245, Muted, Black, FontTiny);
             DrawCenteredText("YE HTET AUNG  •  CHANYUPHYEA LORN", 240, 257, White, Black, FontTiny);
+        }
+
+        // ── Credits ticker ────────────────────────────────────────────────────
+        // Everyone whose work is in the game, scrolling across the sky above the
+        // panel. Keep this in step with CREDITS.md. Only characters the pixel
+        // font has: no ampersand, so "and".
+        private const string CreditsLine =
+            "A GAME BY YE HTET AUNG AND CHANYUPHYEA LORN" +
+            "   •   MUSIC: PECAN PIE (UPPBEAT), REST! (RICARDO CUELLO), CHRISYQN" +
+            "   •   ART: VAMPIREGIRL, VMIINV" +
+            "   •   SOUND: CHEQUERED INK" +
+            "   •   ";
+        private const double CreditsSpeed = 28;   // px/s, slow enough to read
+
+        private void DrawCreditsTicker()
+        {
+            int width = PixelFont.TextWidth(CreditsLine, FontTiny);
+            int loop = width + GameModel.WorldW / 2;
+            int x = GameModel.WorldW - (int)((_clock * CreditsSpeed) % loop);
+
+            // A dim band so the text reads over any part of the sky.
+            canvas.SetColor(15, 29, 39, 150);
+            canvas.FillRect(0, 20, GameModel.WorldW, 11);
+
+            DrawShadowText(CreditsLine, x, 28, GameModel.Gold, Black, FontTiny);
+            // The tail of the line follows the head so the loop is seamless.
+            DrawShadowText(CreditsLine, x + loop, 28, GameModel.Gold, Black, FontTiny);
         }
 
         private void DrawMenuOption(
