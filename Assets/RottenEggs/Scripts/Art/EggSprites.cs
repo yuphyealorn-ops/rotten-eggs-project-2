@@ -97,8 +97,17 @@ namespace RottenEggs
                 SpriteFrame actual = clip.FrameAt((i + 0.5) * seconds, false);
                 SpriteFrame expected = LoadStrip(prefix + (i + 1), first.Width, first.Height, 1, seconds).FrameAt(0, false);
                 for (int p = 0; p < actual.Pixels.Length; p++)
-                    if (!actual.Pixels[p].Equals(expected.Pixels[p]))
+                {
+                    // Unity rewrites the colour under fully transparent pixels on
+                    // import (edge dilation), and the canvas never draws them, so
+                    // only pixels that are visible in either image are compared.
+                    Color32 a = actual.Pixels[p];
+                    Color32 e = expected.Pixels[p];
+                    if (a.a == 0 && e.a == 0)
+                        continue;
+                    if (!a.Equals(e))
                         throw new InvalidOperationException(prefix + (i + 1) + " does not match its strip frame.");
+                }
             }
             if (!ReferenceEquals(first, clip.FrameAt(clip.Duration, true))
                 || !ReferenceEquals(clip.FrameAt(clip.Duration - seconds / 2, false), clip.FrameAt(99, false)))

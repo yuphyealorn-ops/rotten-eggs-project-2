@@ -16,9 +16,9 @@ namespace RottenEggs
     /// </summary>
     public sealed class HeartSprites
     {
-        public const string FullPath = "Sprites/heart";
-        public const string BorderPath = "Sprites/border";
-        public const string BackgroundPath = "Sprites/background_heart";
+        public const string FullPath = "Sprites/hearts/heart";
+        public const string BorderPath = "Sprites/hearts/border";
+        public const string BackgroundPath = "Sprites/hearts/background_heart";
 
         public readonly SpriteFrame Full;
         public readonly SpriteFrame Border;

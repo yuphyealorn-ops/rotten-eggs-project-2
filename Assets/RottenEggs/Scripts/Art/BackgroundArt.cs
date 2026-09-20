@@ -15,7 +15,7 @@ namespace RottenEggs
     public static class BackgroundArt
     {
         /// <summary>Path under any Resources folder, without the file extension.</summary>
-        public const string ResourcePath = "Sprites/background";
+        public const string ResourcePath = "Sprites/background/background";
 
         /// <summary>
         /// Reads the backdrop and box-filters it down to the pixel canvas size.

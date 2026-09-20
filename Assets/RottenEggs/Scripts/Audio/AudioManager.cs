@@ -73,9 +73,9 @@ namespace RottenEggs
         /// </summary>
         private static readonly Dictionary<Music, string[]> MusicResources = new Dictionary<Music, string[]>
         {
-            { Music.Menu, new[] { "Audio/titlescreensong" } },
-            { Music.Game, new[] { "Audio/boogie", "Audio/pixel-drift" } },
-            { Music.Boss, new[] { "Audio/boss_fight" } }
+            { Music.Menu, new[] { "Audio/music/titlescreensong" } },
+            { Music.Game, new[] { "Audio/music/boogie", "Audio/music/pixel-drift" } },
+            { Music.Boss, new[] { "Audio/music/boss_fight" } }
         };
 
         /// <summary>
@@ -84,8 +84,8 @@ namespace RottenEggs
         /// </summary>
         private static readonly Dictionary<Sfx, string[]> SfxResources = new Dictionary<Sfx, string[]>
         {
-            { Sfx.Explosion, new[] { "Audio/explosion_quick", "Audio/explosion_small" } },
-            { Sfx.Swipe, new[] { "Audio/swipe" } }
+            { Sfx.Explosion, new[] { "Audio/sfx/explosion_quick", "Audio/sfx/explosion_small" } },
+            { Sfx.Swipe, new[] { "Audio/sfx/swipe" } }
         };
 
         private static readonly System.Random musicPicker = new System.Random();
